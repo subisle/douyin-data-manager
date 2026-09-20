@@ -78,6 +78,16 @@ func main() {
 		log.Info("QQ 通道未配置 AppID，可在网页里填写")
 	}
 
+	// 带凭据的通道开机自启（与 615 行为一致：起服务即连，不用手动点开始）。
+	// 微信没 token 时 Start 会报未登录，忽略即可——扫码后自动进入会话。
+	for _, name := range []string{"weixin", "qq"} {
+		startCtx, startCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		if err := bots.Start(startCtx, name); err != nil {
+			log.Warn("通道自启失败（可稍后在机器人页手动启动）", "channel", name, "err", err)
+		}
+		startCancel()
+	}
+
 	srv := httpapi.New(r, bots, cfg, log)
 
 	// 单容器部署时，前端产物交给同一个端口托管，省一层反代。
