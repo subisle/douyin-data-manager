@@ -71,6 +71,10 @@ export async function GET(request: Request, context: RouteContext) {
 
     if (one === "startup-health") return apiOk(await call("getStartupHealth"));
 
+    if (one === "imports" && two === "logs") {
+      return apiOk(await call("listImportLogs", num(sp.get("limit"), 50)));
+    }
+
     if (one === "bots") {
       const result = await handleBotsRequest({
         method: "GET",
@@ -160,10 +164,14 @@ export async function POST(request: Request, context: RouteContext) {
       return apiOk(await call("getImportPreview", body.kind, body.date, body.anchorIds, body.meta));
     }
     if (one === "imports" && two === "wave") {
-      return apiOk(await call("importWaveSnapshots", body.date, body.rows, body.meta));
+      const rawInfo = (body.info ?? {}) as Record<string, unknown>;
+      const info = { ...rawInfo, source: (rawInfo.source as string) || "web" };
+      return apiOk(await call("importWaveSnapshots", body.date, body.rows, body.meta, info));
     }
     if (one === "imports" && two === "duration") {
-      return apiOk(await call("importDurationSnapshots", body.date, body.rows, body.meta));
+      const rawInfo = (body.info ?? {}) as Record<string, unknown>;
+      const info = { ...rawInfo, source: (rawInfo.source as string) || "web" };
+      return apiOk(await call("importDurationSnapshots", body.date, body.rows, body.meta, info));
     }
 
     if (one === "flags" && two === "settle") return apiOk(await call("settleFlagScores", body.period));

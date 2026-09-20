@@ -1,19 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileText, Upload, Download, Trash2 } from "lucide-react";
+import { FileText, Upload, Download, Trash2, History } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ImportPage, type DroppedImportFile } from "./import-page";
+import { ImportLogsPage } from "./import-logs-page";
 import { ExportPage } from "./export-page";
 import { DailyReportPage } from "./daily-report-page";
 import { DataCleanupPage } from "./data-cleanup-page";
 
-type Tab = "report" | "import" | "export" | "cleanup";
+type Tab = "report" | "import" | "logs" | "export" | "cleanup";
 
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
   { id: "report", label: "每日报告", icon: FileText },
   { id: "import", label: "数据导入", icon: Upload },
+  { id: "logs", label: "导入日志", icon: History },
   { id: "export", label: "数据导出", icon: Download },
   { id: "cleanup", label: "数据清理", icon: Trash2 },
 ];
@@ -68,6 +70,8 @@ export function DataPage({
             />
           </CardContent>
         </Card>
+      ) : tab === "logs" ? (
+        <ImportLogsPage />
       ) : (
         <Card>
           <CardContent className="space-y-6 pt-6 pb-8">

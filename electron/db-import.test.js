@@ -65,6 +65,15 @@ function createDatabaseMock(options = {}) {
 
   const db = {
     async query(sql) {
+      if (/^SELECT COLUMN_NAME/.test(sql.trim())) {
+        // ensureImportRecordsTable 幂等加列检查：返回全列已存在，跳过 ALTER
+        return [[
+          { name: "id" }, { name: "kind" }, { name: "import_date" },
+          { name: "file_hash" }, { name: "data_hash" }, { name: "file_name" },
+          { name: "row_count" }, { name: "created_at" }, { name: "source" },
+          { name: "matched_count" }, { name: "unmatched_count" }, { name: "duplicate_rows" },
+        ]];
+      }
       assert.match(sql, /^CREATE TABLE IF NOT EXISTS import_records/);
       events.push("ensure-schema");
       return [{ affectedRows: 0 }];

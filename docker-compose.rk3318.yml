@@ -50,6 +50,8 @@ services:
     <<: *app
     container_name: douyin-web
     command: npm run start
+    labels:
+      - autoheal=true
     ports:
       - "${DOUYIN_WEB_PORT:-3000}:3000"
     healthcheck:
@@ -60,6 +62,22 @@ services:
       retries: 3
     mem_limit: ${DOUYIN_WEB_MEM:-1024m}
     memswap_limit: ${DOUYIN_WEB_MEMSWAP:-1536m}
+
+  # 健康检查 unhealthy 时自动重启 web 容器（崩溃重启由 restart: unless-stopped 覆盖）
+  autoheal:
+    image: willfarrell/autoheal:latest
+    platform: linux/arm64
+    container_name: douyin-autoheal
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_INTERVAL: "60"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
 
   bot:
     <<: *app

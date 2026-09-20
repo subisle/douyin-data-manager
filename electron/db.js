@@ -168,13 +168,19 @@ async function assertImportNotRecorded(db, kind, importDate, meta) {
   }
 }
 
-async function recordImport(db, kind, importDate, meta) {
+async function recordImport(db, kind, importDate, meta, info = null) {
   if (!meta) return;
+  const source = String(info?.source || "bot").slice(0, 16);
+  const matchedCount = Number(info?.matchedCount) || 0;
+  const unmatchedCount = Number(info?.unmatchedCount) || 0;
+  const duplicateRows = Number(info?.duplicateRows) || 0;
   await db.query(
     `INSERT INTO import_records
-       (kind, import_date, file_hash, data_hash, file_name, row_count)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [kind, importDate, meta.fileHash, meta.dataHash, meta.fileName, meta.rowCount]
+       (kind, import_date, file_hash, data_hash, file_name, row_count,
+        source, matched_count, unmatched_count, duplicate_rows)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [kind, importDate, meta.fileHash, meta.dataHash, meta.fileName, meta.rowCount,
+     source, matchedCount, unmatchedCount, duplicateRows]
   );
 }
 
@@ -208,7 +214,7 @@ function normalizeDurationImportDate(value) {
   throw new Error(`无效的时长导入日期(应为 YYYY-MM 月份): ${text}`);
 }
 
-async function importSnapshotRows(db, kind, importDate, rows, meta) {
+async function importSnapshotRows(db, kind, importDate, rows, meta, info = null) {
   if (!Array.isArray(rows) || rows.length === 0) return { inserted: 0 };
 
   let values;
@@ -273,7 +279,7 @@ async function importSnapshotRows(db, kind, importDate, rows, meta) {
     await assertImportNotRecorded(conn, kind, importDate, importMeta);
     if (monthClear) await conn.query(monthClear.sql, monthClear.params);
     const [result] = await conn.query(upsertSql, [values]);
-    await recordImport(conn, kind, importDate, importMeta);
+    await recordImport(conn, kind, importDate, importMeta, info);
     await conn.commit();
     transactionStarted = false;
     return { inserted: result.affectedRows };
@@ -874,16 +880,44 @@ async function getWaveTrendByGender() {
  * 批量导入音浪快照（按 anchor_id + import_date UPSERT，可重复导入覆盖）。
  * rows: [{ anchorId, waveValue, rank }]
  */
-async function importWaveSnapshots(importDate, rows, meta) {
-  return importSnapshotRows(getPool(), "wave", importDate, rows, meta);
+async function importWaveSnapshots(importDate, rows, meta, info = null) {
+  return importSnapshotRows(getPool(), "wave", importDate, rows, meta, info);
 }
 
 /**
  * 批量导入时长快照（同上 UPSERT）。
  * rows: [{ anchorId, totalMinutes }]
  */
-async function importDurationSnapshots(importDate, rows, meta) {
-  return importSnapshotRows(getPool(), "duration", importDate, rows, meta);
+async function importDurationSnapshots(importDate, rows, meta, info = null) {
+  return importSnapshotRows(getPool(), "duration", importDate, rows, meta, info);
+}
+
+/**
+ * 导入日志：最近 N 条导入记录（含来源与匹配统计），供网页「导入日志」页与机器人「导入记录」指令使用。
+ */
+async function listImportLogs(limit = 50) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const db = getPool();
+  await ensureImportRecordsTable(db);
+  const [rows] = await db.query(
+    `SELECT id, kind, import_date, file_name, row_count,
+            source, matched_count, unmatched_count, duplicate_rows, created_at
+       FROM import_records
+      ORDER BY id DESC
+      LIMIT ${safeLimit}`
+  );
+  return (rows || []).map((r) => ({
+    id: Number(r.id) || 0,
+    kind: String(r.kind || ""),
+    importDate: r.import_date || null,
+    fileName: String(r.file_name || ""),
+    rowCount: Number(r.row_count) || 0,
+    source: String(r.source || "bot"),
+    matchedCount: Number(r.matched_count) || 0,
+    unmatchedCount: Number(r.unmatched_count) || 0,
+    duplicateRows: Number(r.duplicate_rows) || 0,
+    createdAt: r.created_at || null,
+  }));
 }
 
 async function getImportPreview(kind, importDate, anchorIds, meta) {
@@ -3819,6 +3853,7 @@ module.exports = {
   getWaveTrendByGender,
   importWaveSnapshots,
   importDurationSnapshots,
+  listImportLogs,
   getImportPreview,
   exportWaveSnapshots,
   exportDurationSnapshots,

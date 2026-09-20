@@ -322,6 +322,8 @@ export function createHttpElectronApi(): ElectronAPI {
     getWaveTrendByGender: () => request("/dashboard/wave-trend-by-gender"),
     importWave: (date, rows, meta) =>
       request("/imports/wave", { method: "POST", body: { date, rows, meta } }),
+    listImportLogs: (limit = 50) =>
+      request(`/imports/logs${qs({ limit })}`),
     importDuration: (date, rows, meta) =>
       request("/imports/duration", { method: "POST", body: { date, rows, meta } }),
     getImportPreview: (kind, date, anchorIds, meta) =>

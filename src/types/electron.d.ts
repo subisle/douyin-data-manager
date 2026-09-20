@@ -688,6 +688,19 @@ export interface ImportResult {
   inserted: number;
 }
 
+export interface ImportLogRow {
+  id: number;
+  kind: string;
+  importDate: string | null;
+  fileName: string;
+  rowCount: number;
+  source: string;
+  matchedCount: number;
+  unmatchedCount: number;
+  duplicateRows: number;
+  createdAt: string | null;
+}
+
 export interface ImportMeta {
   fileHash: string;
   dataHash: string;
@@ -1242,6 +1255,7 @@ declare global {
       anchorIds: string[],
       meta?: ImportMeta
     ) => Promise<IpcResult<ImportPreviewResult>>;
+    listImportLogs: (limit?: number) => Promise<IpcResult<ImportLogRow[]>>;
     exportWave: (
       date?: string
     ) => Promise<IpcResult<Record<string, string | number>[]>>;

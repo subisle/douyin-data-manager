@@ -14,6 +14,23 @@ async function ensureImportRecordsTable(db) {
        UNIQUE KEY uq_import_kind_date_data (kind, import_date, data_hash)
      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+  // 导入日志扩展列（2026-09）：来源 bot/web + 匹配统计。老库幂等补列。
+  const [cols] = await db.query(
+    `SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'import_records'`
+  );
+  const have = new Set((cols || []).map((c) => String(c.name || "").toLowerCase()));
+  const wanted = [
+    ["source", "VARCHAR(16) NOT NULL DEFAULT 'bot'"],
+    ["matched_count", "INT NOT NULL DEFAULT 0"],
+    ["unmatched_count", "INT NOT NULL DEFAULT 0"],
+    ["duplicate_rows", "INT NOT NULL DEFAULT 0"],
+  ];
+  for (const [name, def] of wanted) {
+    if (!have.has(name)) {
+      await db.query(`ALTER TABLE import_records ADD COLUMN ${name} ${def}`);
+    }
+  }
 }
 
 async function ensureChannelAnchorBindsTable(db) {

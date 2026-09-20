@@ -19,7 +19,7 @@ const RETIRED_AI_RE =
   /^(?:人工客服|智能客服|客服|开启客服|打开客服|开启智能|打开智能|智能模式|AI模式|ai模式|纯指令|指令模式|仅指令|退出客服|关闭客服|结束客服|取消客服|关闭智能|退出智能|清空对话|清除记忆|清除对话|清除习惯|清除我的习惯|清空习惯)$/i;
 const RETIRED_AI_REPLY = [
   "本系统已移除 AI 对话能力，现在只支持固定指令。",
-  "发「帮助」查看指令菜单；发「9.11」再接连传音浪、时长两个 CSV 即可导入该日数据。",
+  "发「帮助」查看指令菜单；发「9.11」再接连传音浪、时长两个 CSV 即可导入该日数据。发「导入记录」查看最近导入。",
 ].join("\n");
 
 function normalizeText(value) {
@@ -1058,11 +1058,17 @@ async function handleInboundFile(args, db, pendingDates, dailyPush = null) {
   const importRows = kind === "wave"
     ? matched.rows.map((row) => ({ anchorId: row.anchorId, waveValue: row.value, rank: row.rank }))
     : matched.rows.map((row) => ({ anchorId: row.anchorId, totalMinutes: row.value }));
+  const importInfo = {
+    source: "bot",
+    matchedCount: matched.rows.length,
+    unmatchedCount: matched.unmatched.length,
+    duplicateRows: matched.duplicateRows,
+  };
   args.assertLease?.();
   if (kind === "wave") {
-    await db.importWaveSnapshots(date, importRows, meta);
+    await db.importWaveSnapshots(date, importRows, meta, importInfo);
   } else {
-    await db.importDurationSnapshots(date, importRows, meta);
+    await db.importDurationSnapshots(date, importRows, meta, importInfo);
   }
   args.assertLease?.();
   const label = kind === "wave" ? "音浪" : "时长";
@@ -1237,6 +1243,30 @@ function createWeixinCommandHandler({ db, renderReportPng, renderDailyStarPng: r
         await args.replyText(
           `已记住导入日期 ${importDateHint}（10 分钟内有效，可连传 ${pendingImportDates.maxFiles} 个文件）。请依次发送音浪与时长 CSV。`
         );
+        return { handled: true };
+      }
+
+      // 「导入记录」：最近 5 次导入（含来源与匹配统计）
+      if (/^导入(记录|日志)$/.test(normalizeText(args.text || ""))) {
+        try {
+          const logs = typeof db.listImportLogs === "function" ? await db.listImportLogs(5) : [];
+          if (!logs.length) {
+            await args.replyText("还没有导入记录。发 CSV 即可导入（音浪 + 时长两个文件）。");
+            return { handled: true };
+          }
+          const kindLabel = { wave: "音浪", duration: "时长" };
+          const sourceLabel = { bot: "机器人", web: "网页" };
+          const lines = logs.map((log, i) => {
+            const day = String(log.importDate || "").slice(5).replace("-", "月") + "日";
+            const time = log.createdAt
+              ? String(log.createdAt).replace("T", " ").slice(5, 16)
+              : "";
+            return `${i + 1}. ${day} ${kindLabel[log.kind] || log.kind} ${log.fileName || "未命名"}：${log.rowCount} 条（匹配 ${log.matchedCount}/未匹配 ${log.unmatchedCount}） ${sourceLabel[log.source] || log.source} ${time}`;
+          });
+          await args.replyText(`最近 ${logs.length} 次导入：\n${lines.join("\n")}`);
+        } catch (error) {
+          await args.replyText(`读取导入记录失败：${error?.message || error}`);
+        }
         return { handled: true };
       }
 
