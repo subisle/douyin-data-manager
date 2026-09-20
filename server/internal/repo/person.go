@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -23,7 +24,16 @@ type Repo struct {
 }
 
 // New 构造 Repo。
-func New(db *sqlx.DB) *Repo { return &Repo{db: db} }
+func New(db *sqlx.DB) *Repo {
+	r := &Repo{db: db}
+	// 导入日志扩展列幂等补齐（Next 侧建的老表可能没有这些列）。
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		r.ensureImportLogColumns(ctx)
+	}()
+	return r
+}
 
 // PersonFilter 是主播列表的筛选条件。
 type PersonFilter struct {

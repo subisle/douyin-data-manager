@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, fmtMinutes, fmtWave, type MonthlyRow, type Person, type YearlyRow } from "./api";
+import { api, fmtMinutes, fmtWave, type ImportLogRow, type MonthlyRow, type Person, type YearlyRow } from "./api";
 
 // 统一的加载态封装：每个页面都要 loading / error / reload，别复制五遍。
 export function useLoad<T>(loader: () => Promise<T>, deps: unknown[]) {
@@ -487,5 +487,74 @@ export function ImportPage() {
         anchorId 必须先在主播管理页绑定，否则该行会被跳过（导入结果里会列出）。
       </div>
     </div>
+  );
+}
+
+
+/* ------------------------------- 导入日志 ------------------------------- */
+
+const kindLabel: Record<string, string> = { wave: "音浪", duration: "时长" };
+const sourceLabel: Record<string, string> = { bot: "机器人", web: "网页" };
+
+const friendlyDay = (iso: string | null | undefined) => {
+  if (!iso) return "—";
+  const text = String(iso).slice(0, 10);
+  const [y, m, d] = text.split("-");
+  if (!y || !m || !d) return text;
+  return `${Number(m)}月${Number(d)}日`;
+};
+
+const friendlyTime = (iso: string | null | undefined) =>
+  iso ? String(iso).replace("T", " ").slice(0, 16) : "—";
+
+export function ImportLogsPage() {
+  const { data, error, loading, reload } = useLoad(() => api.listImportLogs(100), []);
+
+  return (
+    <section className="panel">
+      <h3 style={{ marginTop: 0 }}>导入日志</h3>
+      <div className="toolbar">
+        <button onClick={reload}>刷新</button>
+      </div>
+      <Status loading={loading} error={error} />
+      {data && data.length === 0 && (
+        <p className="muted">还没有导入记录。发 CSV 或在「数据导入」页导入即可生成日志。</p>
+      )}
+      {data && data.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>数据日期</th>
+              <th>类型</th>
+              <th>文件</th>
+              <th>行数</th>
+              <th>匹配</th>
+              <th>未匹配</th>
+              <th>来源</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((log: ImportLogRow) => (
+              <tr key={log.id}>
+                <td className="muted">{friendlyTime(log.created_at)}</td>
+                <td>{friendlyDay(log.import_date)}</td>
+                <td>{kindLabel[log.kind] ?? log.kind}</td>
+                <td className="muted" style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {log.file_name || "—"}
+                </td>
+                <td>{log.row_count}</td>
+                <td>{log.matched_count}</td>
+                <td>
+                  {log.unmatched_count}
+                  {log.duplicate_rows > 0 ? <span className="muted">（重复 {log.duplicate_rows}）</span> : null}
+                </td>
+                <td className="muted">{sourceLabel[log.source] ?? log.source}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }

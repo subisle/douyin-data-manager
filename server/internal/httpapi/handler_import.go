@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -354,7 +355,7 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 
 	// 记一笔去重账（与 bot/615 共用）。失败不算失败：数据已入库，最多下次再拦一次
 	if err := s.repo.InsertImportRecord(r.Context(), string(kind), date,
-		fileHash, dataHash, filename, affected); err != nil {
+		fileHash, dataHash, filename, affected, &repo.ImportStats{Source: "web"}); err != nil {
 		// 只进日志，不影响响应
 		_ = err
 	}
@@ -400,4 +401,21 @@ func parseRange(w http.ResponseWriter, rawFrom, rawTo string) (time.Time, time.T
 		return time.Time{}, time.Time{}, false
 	}
 	return from, to, true
+}
+
+// importLogs GET /api/v1/imports/logs?limit=50
+// 最近导入日志（含来源与匹配统计），网页「导入日志」页使用。
+func (s *Server) importLogs(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	logs, err := s.repo.ListImportLogs(r.Context(), limit)
+	if err != nil {
+		internalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, logs)
 }

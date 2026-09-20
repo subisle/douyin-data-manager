@@ -205,7 +205,23 @@ const qs = (params: Record<string, string | undefined>) => {
   return s ? `?${s}` : "";
 };
 
+export interface ImportLogRow {
+  id: number;
+  kind: string;
+  import_date: string;
+  file_name: string;
+  row_count: number;
+  source: string;
+  matched_count: number;
+  unmatched_count: number;
+  duplicate_rows: number;
+  created_at: string;
+}
+
 export const api = {
+  listImportLogs: (limit = 100) =>
+    request<ImportLogRow[]>(`/imports/logs?limit=${limit}`),
+
   listPersons: (params: { gender?: string; status?: string; keyword?: string } = {}) =>
     request<Person[]>("/persons" + qs(params)),
 

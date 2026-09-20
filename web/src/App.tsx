@@ -3,7 +3,7 @@ import { DashboardPage } from "./dashboard";
 import { BotPage } from "./botpage";
 import { ExportPage } from "./exportpage";
 import { ImportPage } from "./importpage";
-import { DailyPage, MonthlyPage, PersonsPage, YearlyPage } from "./pages";
+import { DailyPage, ImportLogsPage, MonthlyPage, PersonsPage, YearlyPage } from "./pages";
 
 const TABS = [
   { key: "home", label: "首页", Comp: DashboardPage },
@@ -12,6 +12,7 @@ const TABS = [
   { key: "yearly", label: "年度汇总", Comp: YearlyPage },
   { key: "persons", label: "主播管理", Comp: PersonsPage },
   { key: "import", label: "数据导入", Comp: ImportPage },
+  { key: "logs", label: "导入日志", Comp: ImportLogsPage },
   { key: "export", label: "导出图片", Comp: ExportPage },
   { key: "bots", label: "机器人", Comp: BotPage },
 ] as const;

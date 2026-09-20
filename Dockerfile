@@ -1,89 +1,39 @@
 # ---------------------------------------------------------------------------
-# RK3318 BOX — Rockchip RK3318 (aarch64 / arm64, 4x Cortex-A53)
-#   Host : Armbian 26.2.0-trunk.488 trixie (Debian 13)
-#   Kernel: 6.18.13-current-rockchip64
-#   Docker: 29.x, 原生平台 linux/aarch64, overlayfs + cgroup v2
+# 3328 单容器镜像：Go 后端 + Vite 前端静态产物，一个二进制一个端口。
+#   - Go 二进制（CGO=0 静态编译）跑 API + 机器人，启动时自带 DB 迁移
+#   - web/dist 由 Go 的 ServeStatic 托管（DY_WEB_DIR）
+# 相比旧 Next.js 镜像（1.18GB），本镜像约 50MB。
 #
 # 本机原生构建（在盒子上）:
 #   docker build --platform linux/arm64 -t douyin-data-manager:arm64 .
-# 交叉构建（x64 开发机 → arm64，buildx + QEMU）:
-#   bash scripts/docker-build-arm64.sh --save release/douyin-arm64.tar
-#   scp release/douyin-arm64.tar root@<box>:/tmp/ && ssh root@<box> 'docker load -i /tmp/douyin-arm64.tar'
+# GitHub Actions（ubuntu-24.04-arm 原生 runner）自动构建 → artifact tar → 盒子 docker load
 # ---------------------------------------------------------------------------
 
-ARG NODE_IMAGE=node:22-bookworm-slim
+FROM golang:1.27-alpine AS build-go
+WORKDIR /src
+ENV GOTOOLCHAIN=auto \
+    CGO_ENABLED=0
+COPY server/go.mod server/go.sum ./
+RUN go mod download
+COPY server/ .
+RUN go build -trimpath -ldflags "-s -w" -o /out/douyin-server ./cmd/server
 
-FROM ${NODE_IMAGE} AS base
-ENV DEBIAN_FRONTEND=noninteractive \
-    TZ=Asia/Shanghai \
-    NEXT_TELEMETRY_DISABLED=1 \
-    NODE_ENV=production
+FROM node:22-alpine AS build-web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ .
+RUN npm run build
 
-# ---------------------------------------------------------------------------
-# build-tools：只给 deps / build 阶段用。
-# 提供 g++ / python3 兜底：若 sharp / better-sqlite3 的 arm64 预编译包下载失败，
-# node-gyp 可现场编译。该层不会进入最终镜像。
-# ---------------------------------------------------------------------------
-FROM base AS build-tools
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      build-essential python3 ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata curl
 WORKDIR /app
-
-# ---------------------------------------------------------------------------
-# deps：仅生产依赖。sharp 在此拿到 @img/sharp-linux-arm64 预编译二进制。
-# ---------------------------------------------------------------------------
-FROM build-tools AS deps
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --no-audit --no-fund
-
-# ---------------------------------------------------------------------------
-# build：编译 Next.js。
-# --ignore-scripts 跳过 dev 原生依赖（better-sqlite3 仅桌面备份脚本用），
-# 盒子 4×A53 上省下几分钟编译时间。
-# NODE_OPTIONS 限制堆：RK3318 通常 2–4 GB RAM，next build 不设限容易 OOM。
-# ---------------------------------------------------------------------------
-FROM build-tools AS build
-ARG BUILD_NODE_OPTIONS="--max-old-space-size=2048"
-ENV NODE_OPTIONS=${BUILD_NODE_OPTIONS}
-COPY package.json package-lock.json ./
-# 必须显式带 devDependencies：base 阶段设了 NODE_ENV=production，
-# npm ci 会因此跳过 devDeps，导致 next build 中途再联网安装 typescript（A53 上白白多花几分钟）
-RUN npm ci --ignore-scripts --include=dev --no-audit --no-fund
-COPY . .
-RUN npm run build \
- && rm -rf node_modules .next/cache
-
-# ---------------------------------------------------------------------------
-# runtime
-#   fonts-noto-cjk：日报 / PK 分组图出图必须有中文字体，否则方框乱码。
-# ---------------------------------------------------------------------------
-FROM base AS runtime
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      ca-certificates curl tzdata fontconfig fonts-noto-cjk \
- && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-ENV NODE_OPTIONS="--max-old-space-size=1024" \
-    PORT=3000 \
-    PROJECT_BOTS=0
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/. ./
-# slim 镜像不含 typescript（devDep）。next start 读取 next.config.ts 时会现场
-# npm install typescript，导致启动极慢。这里用等价 JS 配置替换（构建期已用
-# 原配置产出 .next，运行时只需同构的 config）。
-RUN printf '%s\n' \
-      'const isElectron = process.env.ELECTRON === "true";' \
-      'const nextConfig = {' \
-      '  output: isElectron ? "export" : undefined,' \
-      '  images: { unoptimized: true },' \
-      '  assetPrefix: isElectron ? "./" : undefined,' \
-      '};' \
-      'export default nextConfig;' \
-      > next.config.mjs \
- && rm -f next.config.ts
+COPY --from=build-go /out/douyin-server ./douyin-server
+COPY --from=build-web /web/dist ./web
+ENV DY_WEB_DIR=/app/web \
+    DY_ADDR=:3000 \
+    TZ=Asia/Shanghai
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD curl -fsS "http://127.0.0.1:${PORT}/api/v1/health" || exit 1
-CMD ["npm", "run", "start"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:3000/healthz" || exit 1
+CMD ["./douyin-server"]

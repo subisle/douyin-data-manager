@@ -300,6 +300,28 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 		out.Text = HelpText()
 		return out, nil
 
+	case IntentImportLogs:
+		logs, err := m.repo.ListImportLogs(ctx, 5)
+		if err != nil {
+			out.Text = "读取导入记录失败：" + err.Error()
+			return out, nil
+		}
+		if len(logs) == 0 {
+			out.Text = "还没有导入记录。发 CSV 即可导入（音浪 + 时长两个文件）。"
+			return out, nil
+		}
+		kindLabel := map[string]string{"wave": "音浪", "duration": "时长"}
+		sourceLabel := map[string]string{"bot": "机器人", "web": "网页"}
+		lines := make([]string, 0, len(logs))
+		for i, log := range logs {
+			lines = append(lines, fmt.Sprintf("%d. %s %s %s：%d 条（匹配 %d/未匹配 %d） %s %s",
+				i+1, friendlyDate(log.ImportDate.Format("2006-01-02")), kindLabel[log.Kind], log.FileName,
+				log.RowCount, log.MatchedCount, log.UnmatchedCount,
+				sourceLabel[log.Source], log.CreatedAt.Format("01-02 15:04")))
+		}
+		out.Text = fmt.Sprintf("最近 %d 次导入：\n%s", len(logs), strings.Join(lines, "\n"))
+		return out, nil
+
 	case IntentImportDate:
 		m.rememberImportDate(in.ConversationID, intent.Date)
 		out.Text = fmt.Sprintf(

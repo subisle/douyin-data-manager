@@ -26,6 +26,7 @@ const (
 	IntentPKGroup       IntentKind = "pk_group"
 	IntentImportDate    IntentKind = "import_date"
 	IntentAddAnchor     IntentKind = "add_anchor"
+	IntentImportLogs    IntentKind = "import_logs"
 	IntentUnknown       IntentKind = "unknown"
 )
 
@@ -94,6 +95,12 @@ func ParseIntent(raw string, now time.Time) Intent {
 	}
 
 	lower := strings.ToLower(text)
+
+	// 导入记录/导入日志：查看最近导入
+	if lower == "导入记录" || lower == "导入日志" {
+		intent.Kind = IntentImportLogs
+		return intent
+	}
 
 	// 帮助
 	for _, kw := range []string{"帮助", "help", "菜单", "指令"} {

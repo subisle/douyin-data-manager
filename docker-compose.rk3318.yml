@@ -1,14 +1,14 @@
 # ---------------------------------------------------------------------------
-# RK3318 BOX (Rockchip RK3318 / aarch64) — Docker 29 自带 compose v2，无需 docker-compose 二进制
+# RK3318 BOX (Rockchip RK3318 / aarch64) — Docker 29 自带 compose v2
 #
-#   cp deploy/rk3318/.env.example deploy/rk3318/.env   # 然后填真实值
-#   docker compose -f docker-compose.rk3318.yml up -d --build     # 盒子原生构建
-#   docker compose -f docker-compose.rk3318.yml up -d             # 已 load 镜像
-#   docker compose -f docker-compose.rk3318.yml run --rm web node scripts/migrate.js up
+# 3328 单容器：Go 后端（API + 机器人 + 自带迁移）托管 web/dist，一个端口。
+#   docker compose --env-file deploy/rk3318/.env -f docker-compose.rk3318.yml up -d
+#   ↑ --env-file 必须：${DB_*}/${QQ_*} 插值读它，env_file 只注入容器不参与插值
+#   docker compose -f docker-compose.rk3318.yml up -d --build   # 盒子原生构建
+#   docker compose -f docker-compose.rk3318.yml up -d           # 已 load 镜像
 #
 # 可选 profile：
 #   --profile db    盒子没装 MySQL 时，用容器内 MySQL 8.4
-#   --profile bot   跑 scripts/bot-worker.js（实验性，见 CLAUDE.md 第 4 节）
 # ---------------------------------------------------------------------------
 
 name: douyin-rk3318
@@ -23,19 +23,6 @@ x-app: &app
   platform: linux/arm64
   env_file:
     - deploy/rk3318/.env
-  environment:
-    TZ: Asia/Shanghai
-    NODE_ENV: production
-    PORT: "3000"
-    NODE_OPTIONS: --max-old-space-size=1024
-  volumes:
-    - ${DOUYIN_DATA_DIR:-/srv/douyin}/runtime:/app/data/runtime
-    - ${DOUYIN_DATA_DIR:-/srv/douyin}/artifacts:/var/lib/douyin/artifacts
-    - ${DOUYIN_DATA_DIR:-/srv/douyin}/exports:/app/data/exports
-    # 机器人配置与状态（微信凭据、QQ 多机器人配置、绑定用户）——挂出来才不会随容器重建丢失
-    - ${DOUYIN_DATA_DIR:-/srv/douyin}/builtin:/app/data/builtin
-    # 仓库不含字体（assets/fonts 被 gitignore），出图需要自己挂
-    - ${DOUYIN_FONT_DIR:-./assets/fonts}:/app/assets/fonts:ro
   extra_hosts:
     - "host.docker.internal:host-gateway"
   restart: unless-stopped
@@ -49,19 +36,33 @@ services:
   web:
     <<: *app
     container_name: douyin-web
-    command: npm run start
     labels:
       - autoheal=true
+    environment:
+      TZ: Asia/Shanghai
+      # Go 配置走 DY_ 前缀（见 server/internal/config/config.go）
+      DY_ADDR: ":3000"
+      DY_WEB_DIR: /app/web
+      DY_DB_HOST: ${DB_HOST:-host.docker.internal}
+      DY_DB_PORT: ${DB_PORT:-3306}
+      DY_DB_USER: ${DB_USER:-douyin_app}
+      DY_DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD 必填}
+      DY_DB_NAME: ${DB_NAME:-douyin}
+      # 机器人通道：QQ 凭据必填，微信留空则启动后在机器人页扫码
+      DY_QQ_APP_ID: ${QQ_APP_ID:-}
+      DY_QQ_CLIENT_SECRET: ${QQ_CLIENT_SECRET:-}
+      DY_QQ_API_BASE: ${QQ_API_BASE:-https://api.sgroup.qq.com}
+      DY_WEIXIN_TOKEN: ${WEIXIN_TOKEN:-}
     ports:
       - "${DOUYIN_WEB_PORT:-3000}:3000"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api/v1/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/healthz || exit 1"]
       interval: 30s
       timeout: 5s
-      start_period: 60s
+      start_period: 20s
       retries: 3
-    mem_limit: ${DOUYIN_WEB_MEM:-1024m}
-    memswap_limit: ${DOUYIN_WEB_MEMSWAP:-1536m}
+    mem_limit: ${DOUYIN_WEB_MEM:-256m}
+    memswap_limit: ${DOUYIN_WEB_MEMSWAP:-384m}
 
   # 健康检查 unhealthy 时自动重启 web 容器（崩溃重启由 restart: unless-stopped 覆盖）
   autoheal:
@@ -78,19 +79,6 @@ services:
       options:
         max-size: "5m"
         max-file: "2"
-
-  bot:
-    <<: *app
-    container_name: douyin-bot
-    command: node scripts/bot-worker.js
-    profiles: ["bot"]
-    ports: []
-    mem_limit: 384m
-    healthcheck:
-      test: ["CMD-SHELL", "node -e 'process.exit(require(\"fs\").existsSync(process.env.BOT_STORAGE_DIR||\"/app/data/runtime\")?0:1)'"]
-      interval: 60s
-      timeout: 5s
-      retries: 3
 
   mysql:
     image: mysql:8.4

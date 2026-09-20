@@ -176,7 +176,12 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 
 	// 记一笔导入账（与 615 共用 import_records 表，双端互相去重）
 	if err := m.repo.InsertImportRecord(ctx, string(kind), date,
-		fileHash, dataHash, att.FileName, affected); err != nil {
+		fileHash, dataHash, att.FileName, affected, &repo.ImportStats{
+			Source:    "bot",
+			Matched:   matched,
+			Unmatched: preview.Unmatched,
+			Duplicate: preview.Duplicate,
+		}); err != nil {
 		// 账没记上不算失败：数据已入库，最多下次重复导入时再拦一次
 		out.Text += "\n（注意：导入记录写入失败，同一文件可能被再次导入）"
 	}
