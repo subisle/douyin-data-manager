@@ -2,13 +2,11 @@
 # RK3318 BOX (Rockchip RK3318 / aarch64) — Docker 29 自带 compose v2
 #
 # 3328 单容器：Go 后端（API + 机器人 + 自带迁移）托管 web/dist，一个端口。
+# 主库为盒子本地 MySQL（db 服务），sqlpub 远端仅作每日备份目标（见 /srv/douyin/backup-db.sh）。
 #   docker compose --env-file deploy/rk3318/.env -f docker-compose.rk3318.yml up -d
 #   ↑ --env-file 必须：${DB_*}/${QQ_*} 插值读它，env_file 只注入容器不参与插值
 #   docker compose -f docker-compose.rk3318.yml up -d --build   # 盒子原生构建
 #   docker compose -f docker-compose.rk3318.yml up -d           # 已 load 镜像
-#
-# 可选 profile：
-#   --profile db    盒子没装 MySQL 时，用容器内 MySQL 8.4
 # ---------------------------------------------------------------------------
 
 name: douyin-rk3318
@@ -43,7 +41,7 @@ services:
       # Go 配置走 DY_ 前缀（见 server/internal/config/config.go）
       DY_ADDR: ":3000"
       DY_WEB_DIR: /app/web
-      DY_DB_HOST: ${DB_HOST:-host.docker.internal}
+      DY_DB_HOST: ${DB_HOST:-db}
       DY_DB_PORT: ${DB_PORT:-3306}
       DY_DB_USER: ${DB_USER:-douyin_app}
       DY_DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD 必填}
@@ -53,6 +51,9 @@ services:
       DY_QQ_CLIENT_SECRET: ${QQ_CLIENT_SECRET:-}
       DY_QQ_API_BASE: ${QQ_API_BASE:-https://api.sgroup.qq.com}
       DY_WEIXIN_TOKEN: ${WEIXIN_TOKEN:-}
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "${DOUYIN_WEB_PORT:-3000}:3000"
     healthcheck:
@@ -80,27 +81,29 @@ services:
         max-size: "5m"
         max-file: "2"
 
-  mysql:
-    image: mysql:8.4
+  # 主库：盒子本地 MySQL 8.0（与 sqlpub 远端版本一致）。远端仅作每日备份目标。
+  db:
+    image: mysql:8.0
     platform: linux/arm64
-    profiles: ["db"]
     container_name: douyin-mysql
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       - --default-time-zone=+08:00
+      - --innodb-buffer-pool-size=128M
+      - --max-connections=50
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change_me_root}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 必填}
       MYSQL_DATABASE: ${DB_NAME:-douyin}
       MYSQL_USER: ${DB_USER:-douyin_app}
       MYSQL_PASSWORD: ${DB_PASSWORD:-change_me}
     volumes:
       - mysql-data:/var/lib/mysql
-    # 宿主已跑 MySQL 时不要解注释下面这行（3306 会冲突）；容器内访问宿主用 host.docker.internal
-    # ports:
-    #   - "3306:3306"
+    # 发布到局域网：本地 Electron / 同步脚本可直连盒子库
+    ports:
+      - "3306:3306"
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p${MYSQL_ROOT_PASSWORD:-change_me_root} --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p${MYSQL_ROOT_PASSWORD} --silent"]
       interval: 15s
       timeout: 5s
       start_period: 60s
