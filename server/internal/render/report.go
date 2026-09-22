@@ -228,21 +228,16 @@ func (r Report) notLiveDaysLabel() string {
 }
 
 func (r Report) dailyWaveLabel() string {
+	// 615 formatDailyWaveLabel：只有「日」——「19日音浪」
 	parts := strings.Split(r.Date, "-")
-	m, d := "1", "1"
-	if len(parts) >= 2 {
-		m = strings.TrimLeft(parts[1], "0")
-		if m == "" {
-			m = "1"
-		}
-	}
+	d := "1"
 	if len(parts) >= 3 {
 		d = strings.TrimLeft(parts[2], "0")
 		if d == "" {
 			d = "1"
 		}
 	}
-	return m + "月" + d + "日音浪"
+	return d + "日音浪"
 }
 
 func (r Report) summary() (totalCount, notLiveCount, notLiveDays int) {
@@ -273,7 +268,8 @@ func (r Report) pageSuffix() string {
 	if r.PageCount <= 1 {
 		return ""
 	}
-	return fmt.Sprintf("(第%d/%d页)", r.PageIndex, r.PageCount)
+	// 615 的 formatDailyReportPageSuffix：全角括号「（1/2）」
+	return fmt.Sprintf("（%d/%d）", r.PageIndex, r.PageCount)
 }
 
 // genderText classic 页脚用「男 / 女」
