@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DashboardPage } from "./dashboard";
 import { BotPage } from "./botpage";
+import { DataCleanupPage } from "./cleanuppage";
 import { ExportPage } from "./exportpage";
 import { ImportPage } from "./importpage";
 import { DailyPage, ImportLogsPage, MonthlyPage, PersonsPage, YearlyPage } from "./pages";
@@ -13,6 +14,7 @@ const TABS = [
   { key: "persons", label: "主播管理", Comp: PersonsPage },
   { key: "import", label: "数据导入", Comp: ImportPage },
   { key: "logs", label: "导入日志", Comp: ImportLogsPage },
+  { key: "cleanup", label: "数据清理", Comp: DataCleanupPage },
   { key: "export", label: "导出图片", Comp: ExportPage },
   { key: "bots", label: "机器人", Comp: BotPage },
 ] as const;

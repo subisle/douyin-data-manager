@@ -57,6 +57,7 @@ func New(r *repo.Repo, b *bot.Manager, cfg config.Config, log *slog.Logger) *Ser
 	s.mux.HandleFunc("POST /api/v1/imports/preview", s.previewImport)
 	s.mux.HandleFunc("POST /api/v1/imports/csv", s.importCSV)
 	s.mux.HandleFunc("POST /api/v1/imports/recompute", s.recompute)
+	s.mux.HandleFunc("POST /api/v1/imports/purge", s.purgeData)
 	s.mux.HandleFunc("GET /api/v1/imports/logs", s.importLogs)
 
 	// 导出图片（SVG，样式对齐 615）
