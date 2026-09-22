@@ -257,7 +257,7 @@ func (s *Server) previewImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 去重提示：同一文件/同内容在该日期已导入过就提前告诉前端（导入时会硬拦）
+	// 去重账本仅作记录与提示（导入不硬拦，见 importCSV）。
 	var duplicate *repo.ImportRecord
 	fileHash, dataHash := repo.ComputeImportHashes(raw, rows, kind)
 	if rec, err := s.repo.FindImportRecord(r.Context(), string(kind), date, fileHash, dataHash); err == nil {
@@ -294,19 +294,9 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 去重（与 bot/615 共用 import_records 账本）：同一文件/同内容对同一日期只导一次，
-	// 换个日期再导同一文件是允许的。
+	// 去重账本仅作记录（InsertImportRecord 是 upsert），不拦截重复导入：
+	// 快照按（主播, 日期）upsert，重复导入相同数据是幂等的。
 	fileHash, dataHash := repo.ComputeImportHashes(raw, rows, kind)
-	if rec, err := s.repo.FindImportRecord(r.Context(), string(kind), date, fileHash, dataHash); err == nil && rec != nil {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error": map[string]any{
-				"code": "DUPLICATE_IMPORT",
-				"message": fmt.Sprintf("该文件在 %s 已导入过（%d 行），同一日期不允许重复导入。要导入其他日期请修改日期后再传。",
-					rec.ImportAt.Format("2006-01-02"), rec.RowCount),
-			},
-		})
-		return
-	}
 
 	preview, err := s.repo.BuildImportPreview(r.Context(), rows, kind, date)
 	if err != nil {

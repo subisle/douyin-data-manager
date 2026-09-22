@@ -77,6 +77,7 @@ func (r *Repo) FindImportRecord(ctx context.Context, kind string, date time.Time
 // InsertImportRecord 记一笔导入。与 615 的唯一键一致：
 // uq_import_kind_date_file (kind, import_date, file_hash) 和
 // uq_import_kind_date_data (kind, import_date, data_hash)。
+// 允许重复导入：唯一键冲突时更新统计（upsert），账本始终只有一条记录。
 // stats 为 nil 时按来源 bot / 零统计落库。
 func (r *Repo) InsertImportRecord(ctx context.Context, kind string, date time.Time,
 	fileHash, dataHash, fileName string, rowCount int, stats *ImportStats) error {
@@ -91,7 +92,12 @@ func (r *Repo) InsertImportRecord(ctx context.Context, kind string, date time.Ti
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO import_records (kind, import_date, file_hash, data_hash, file_name, row_count,
 		                            source, matched_count, unmatched_count, duplicate_rows)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE
+		   file_name = VALUES(file_name), row_count = VALUES(row_count),
+		   source = VALUES(source), matched_count = VALUES(matched_count),
+		   unmatched_count = VALUES(unmatched_count), duplicate_rows = VALUES(duplicate_rows),
+		   created_at = NOW(3)`,
 		kind, date, fileHash, dataHash, fileName, rowCount,
 		source, matched, unmatched, duplicate)
 	return err

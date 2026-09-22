@@ -147,9 +147,9 @@ export function ImportPage() {
       {err && <p className="err">{err}</p>}
       {done && <p className="ok">{done}</p>}
       {preview?.duplicate && (
-        <p className="err">
-          ⚠️ 该文件在 {preview.duplicate.import_date} 已导入过（{preview.duplicate.row_count} 行）。
-          同一日期不允许重复导入；要导入其他日期请修改日期。
+        <p className="muted">
+          ℹ️ 该文件在 {preview.duplicate.import_date} 已导入过（{preview.duplicate.row_count} 行）。
+          支持重复导入：相同数据会覆盖更新，不会产生重复行。
         </p>
       )}
 

@@ -114,15 +114,9 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 
 	date, source, pending := m.resolveInboundImportDate(in.ConversationID)
 
-	// 去重：文件 MD5 + 规范化数据 SHA256，与 615 共用 import_records 账本。
-	// 口径：同一文件/同一内容对**同一日期**只导一次；换个日期再导允许。
+	// 去重账本仅作记录（InsertImportRecord 是 upsert），不做硬拦截：
+	// 快照按（主播, 日期）upsert，重复导入相同数据是幂等的，允许重发。
 	fileHash, dataHash := repo.ComputeImportHashes(data, rows, kind)
-	if rec, err := m.repo.FindImportRecord(ctx, string(kind), date, fileHash, dataHash); err == nil && rec != nil {
-		out.Text = fmt.Sprintf("这个文件在 %s 已导入过（%s，%d 行），已阻止重复导入。",
-			friendlyDate(date.Format("2006-01-02")),
-			friendlyDate(rec.ImportAt.Format("2006-01-02")), rec.RowCount)
-		return out, nil
-	}
 
 	preview, err := m.repo.BuildImportPreview(ctx, rows, kind, date)
 	if err != nil {
