@@ -294,9 +294,11 @@ func Parse(r io.Reader) (Kind, []Row, error) {
 		if idCol >= 0 && idCol < len(rec) {
 			row.AnchorID = strings.TrimSpace(rec[idCol])
 		}
-		if douyinCol >= 0 && douyinCol < len(rec) && row.AnchorID == "" {
+		if douyinCol >= 0 && douyinCol < len(rec) {
 			row.DouyinNo = strings.TrimSpace(rec[douyinCol])
-			row.AnchorID = row.DouyinNo // 没有主播 id 列时用抖音号顶替（与 615 一致）
+			if row.AnchorID == "" {
+				row.AnchorID = row.DouyinNo // 没有主播 id 列时用抖音号顶替（与 615 一致）
+			}
 		}
 		if nameCol >= 0 && nameCol < len(rec) {
 			row.Name = strings.TrimSpace(rec[nameCol])

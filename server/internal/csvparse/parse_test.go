@@ -119,3 +119,37 @@ func TestParseDurationCSV(t *testing.T) {
 		t.Errorf("时长解析错误: %d / %d, 期望 150 / 150", rows[0].Minutes, rows[1].Minutes)
 	}
 }
+
+func TestParseAnchorsCSV(t *testing.T) {
+	// 主播名单：只有 姓名 + 抖音号（最常见的运营名单）
+	in := "\uFEFF姓名,抖音号\n柚子,123456\n小虎,789\n\n"
+	kind, rows, err := Parse(strings.NewReader(in))
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	if kind != KindAnchors {
+		t.Errorf("类型 = %q, 期望 anchors", kind)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("行数 = %d, 期望 2", len(rows))
+	}
+	if rows[0].Name != "柚子" || rows[0].AnchorID != "123456" || rows[0].DouyinNo != "123456" {
+		t.Errorf("首行 = %+v", rows[0])
+	}
+}
+
+func TestParseAnchorsCSVWithIDColumn(t *testing.T) {
+	// 带 主播ID 和 抖音号 两列：AnchorID 用主播 ID，DouyinNo 单独保留
+	in := "排名,主播ID,抖音号,主播名\n1,111222333,cyl765,浩龙\n"
+	kind, rows, err := Parse(strings.NewReader(in))
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	// 含"音浪/时长"词的才归 wave/duration；此表归 anchors（有主播名/抖音号）
+	if kind != KindAnchors {
+		t.Errorf("类型 = %q, 期望 anchors", kind)
+	}
+	if rows[0].AnchorID != "111222333" || rows[0].DouyinNo != "cyl765" || rows[0].Name != "浩龙" {
+		t.Errorf("首行 = %+v", rows[0])
+	}
+}

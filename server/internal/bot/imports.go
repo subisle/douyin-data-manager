@@ -103,12 +103,18 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 		out.Text = "CSV 解析失败：" + err.Error()
 		return out, nil
 	}
-	if kind != csvparse.KindWave && kind != csvparse.KindDuration {
-		out.Text = "看不出这是音浪表还是时长表（表头没有音浪/时长列）。"
-		return out, nil
-	}
 	if len(rows) == 0 {
 		out.Text = "CSV 里没有有效数据行。"
+		return out, nil
+	}
+
+	// 主播名单 CSV（表头有 姓名/昵称 + 抖音号，没有音浪/时长列）→ 批量建档绑号
+	if kind == csvparse.KindAnchors {
+		return m.handleAnchorCSV(ctx, rows)
+	}
+
+	if kind != csvparse.KindWave && kind != csvparse.KindDuration {
+		out.Text = "看不出这是音浪表还是时长表（表头没有音浪/时长列）。"
 		return out, nil
 	}
 
@@ -314,7 +320,7 @@ func decodeCSV(data []byte) (string, error) {
 
 // addAnchorHint 未匹配时的引导文案。
 func addAnchorHint() string {
-	return "如果想添加主播，请按「姓名-抖音号」的格式发给我（例如：柚子-123456），添加后重发文件即可匹配。"
+	return "如果想添加主播，请按「姓名-抖音号」的格式发给我（例如：柚子-123456）；主播多的话直接发名单 CSV（表头含「姓名」和「抖音号」即可），批量添加。"
 }
 
 // friendlyDate 2026-09-11 → 「11号」（当年当月）/「9月11号」/「2026年9月11号」。
