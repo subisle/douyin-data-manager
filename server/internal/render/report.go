@@ -58,6 +58,49 @@ func DefaultColumns() ColumnSet {
 	return ColumnSet{Rank: true, Name: true, NotLiveDays: true, DailyWave: true, TotalWave: true}
 }
 
+// ParseColumnSet 解析 cols=rank,name,dailyWave,... 的任意列组合（615 字段勾选）。
+// 键与 615 的 ColumnKey 一致；至少要有一个合法键。
+func ParseColumnSet(raw string) (ColumnSet, error) {
+	var set ColumnSet
+	count := 0
+	for _, part := range strings.Split(raw, ",") {
+		switch strings.TrimSpace(strings.ToLower(part)) {
+		case "rank":
+			set.Rank = true
+			count++
+		case "name":
+			set.Name = true
+			count++
+		case "notlivedays":
+			set.NotLiveDays = true
+			count++
+		case "dailywave":
+			set.DailyWave = true
+			count++
+		case "totalwave":
+			set.TotalWave = true
+			count++
+		case "duration":
+			set.Duration = true
+			count++
+		case "master":
+			set.Master = true
+			count++
+		case "tier":
+			set.Tier = true
+			count++
+		case "":
+			// 忽略空段（末尾逗号）
+		default:
+			return ColumnSet{}, fmt.Errorf("未知列: %s", part)
+		}
+	}
+	if count == 0 {
+		return ColumnSet{}, fmt.Errorf("cols 不能为空")
+	}
+	return set, nil
+}
+
 // Report 一张导出图的全部输入。
 type Report struct {
 	Title  string

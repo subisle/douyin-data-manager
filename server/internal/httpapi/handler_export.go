@@ -94,14 +94,24 @@ func (s *Server) exportReport(w http.ResponseWriter, r *http.Request) {
 	pageRows := all[start:end]
 
 	cols := render.DefaultColumns()
-	if r.URL.Query().Get("duration") == "1" {
-		cols.Duration = true
-	}
-	if r.URL.Query().Get("master") == "1" {
-		cols.Master = true
-	}
-	if r.URL.Query().Get("tier") == "1" {
-		cols.Tier = true
+	if rawCols := r.URL.Query().Get("cols"); rawCols != "" {
+		// cols=rank,name,dailyWave,... 任意列组合（615 的字段勾选）
+		set, err := render.ParseColumnSet(rawCols)
+		if err != nil {
+			badRequest(w, err.Error())
+			return
+		}
+		cols = set
+	} else {
+		if r.URL.Query().Get("duration") == "1" {
+			cols.Duration = true
+		}
+		if r.URL.Query().Get("master") == "1" {
+			cols.Master = true
+		}
+		if r.URL.Query().Get("tier") == "1" {
+			cols.Tier = true
+		}
 	}
 
 	inactive := []render.Row{}

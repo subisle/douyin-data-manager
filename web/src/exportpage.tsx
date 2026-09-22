@@ -43,21 +43,39 @@ function download(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+// 列定义与 615 的 ALL_COLUMNS 一致：key 与后端 cols 参数、标签与列头一致
+const ALL_COLUMNS: { key: string; label: string }[] = [
+  { key: "rank", label: "排名" },
+  { key: "name", label: "主播姓名" },
+  { key: "notLiveDays", label: "未播天数" },
+  { key: "dailyWave", label: "日音浪" },
+  { key: "totalWave", label: "累计总音浪" },
+  { key: "duration", label: "当月时长" },
+  { key: "master", label: "师傅" },
+  { key: "tier", label: "等级" },
+];
+const DEFAULT_VISIBLE = ["rank", "name", "notLiveDays", "dailyWave", "totalWave"];
+
 /**
  * 导出图片——字段与样式对齐 615：
- * 排名 / 主播姓名 / 未播天数 / 日音浪 / 累计总音浪（可选：当月时长、师傅、等级）
+ * 8 列自由勾选（默认排名/姓名/未播天数/日音浪/累计总音浪），
  * 女队用 classic 样式，男团用 apple 样式。
  */
 export function ExportPage() {
   const [date, setDate] = useState(todayLocal());
   const [gender, setGender] = useState("female");
   const [style, setStyle] = useState("auto");
-  const [duration, setDuration] = useState(false);
-  const [master, setMaster] = useState(false);
-  const [tier, setTier] = useState(false);
+  const [visible, setVisible] = useState<string[]>(DEFAULT_VISIBLE);
   const [svg, setSvg] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const toggleCol = (key: string) => {
+    setVisible((v) => {
+      const next = v.includes(key) ? v.filter((k) => k !== key) : [...v, key];
+      return next.length ? next : v; // 至少保留一列
+    });
+  };
 
   const load = async () => {
     setBusy(true);
@@ -67,9 +85,8 @@ export function ExportPage() {
         date,
         gender,
         style,
-        duration: duration ? "1" : "0",
-        master: master ? "1" : "0",
-        tier: tier ? "1" : "0",
+        // 列顺序按 615 的固定顺序输出，勾选只决定去留
+        cols: ALL_COLUMNS.filter((c) => visible.includes(c.key)).map((c) => c.key).join(","),
       });
       const res = await fetch(`/api/v1/exports/report.svg?${usp}`);
       if (!res.ok) throw new Error(`后端返回 ${res.status}`);
@@ -93,9 +110,21 @@ export function ExportPage() {
     <div className="panel">
       <h3 style={{ marginTop: 0 }}>导出图片</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        字段：排名 / 主播姓名 / 未播天数 / 日音浪 / 累计总音浪，可选当月时长、师傅、等级。
-        女队默认 classic 样式，男团默认 apple 样式。
+        字段自由勾选（与 615 桌面端一致），女队默认 classic 样式，男团默认 apple 样式。
       </p>
+
+      <div className="toolbar" style={{ flexWrap: "wrap" }}>
+        {ALL_COLUMNS.map((c) => (
+          <label key={c.key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <input
+              type="checkbox"
+              checked={visible.includes(c.key)}
+              onChange={() => toggleCol(c.key)}
+            />
+            {c.label}
+          </label>
+        ))}
+      </div>
 
       <div className="toolbar">
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -108,18 +137,6 @@ export function ExportPage() {
           <option value="classic">classic（样式一）</option>
           <option value="apple">apple（样式二）</option>
         </select>
-        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <input type="checkbox" checked={duration} onChange={(e) => setDuration(e.target.checked)} />
-          当月时长
-        </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <input type="checkbox" checked={master} onChange={(e) => setMaster(e.target.checked)} />
-          师傅
-        </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <input type="checkbox" checked={tier} onChange={(e) => setTier(e.target.checked)} />
-          等级
-        </label>
         <button onClick={() => void load()} disabled={busy}>
           生成预览
         </button>

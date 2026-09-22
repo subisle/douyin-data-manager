@@ -132,3 +132,22 @@ func TestResolveStyle(t *testing.T) {
 		t.Error("显式指定应覆盖默认值")
 	}
 }
+
+func TestParseColumnSet(t *testing.T) {
+	set, err := ParseColumnSet("rank,name,dailyWave,duration")
+	if err != nil {
+		t.Fatalf("合法组合报错: %v", err)
+	}
+	if !set.Rank || !set.Name || !set.DailyWave || !set.Duration {
+		t.Error("勾选列未生效")
+	}
+	if set.TotalWave || set.NotLiveDays {
+		t.Error("未勾选列不应生效")
+	}
+	if _, err := ParseColumnSet("rank,bogus"); err == nil {
+		t.Error("未知列应报错")
+	}
+	if _, err := ParseColumnSet(","); err == nil {
+		t.Error("空组合应报错")
+	}
+}
