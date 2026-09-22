@@ -114,7 +114,9 @@ func DetectKind(headers []string) Kind {
 	return KindUnknown
 }
 
-// ParseWave 解析音浪值，支持 "12.5万" / "125000" / "12,500"。
+// ParseWave 解析音浪值，支持 "12.5万" / "125000" / "12,500" / "45512音浪"。
+// 运营导出的 CSV 数值常带单位尾巴（"音浪"/"元"/"钻"），与 615 的 parseInt
+// 行为对齐：遇到非数字就截断，不报错。
 func ParseWave(raw string) (int64, error) {
 	s := strings.TrimSpace(raw)
 	s = strings.ReplaceAll(s, ",", "")
@@ -122,6 +124,12 @@ func ParseWave(raw string) (int64, error) {
 	if s == "" || s == "-" {
 		return 0, nil
 	}
+
+	// 常见单位尾巴直接剔除
+	for _, unit := range []string{"音浪", "元", "钻"} {
+		s = strings.ReplaceAll(s, unit, "")
+	}
+	s = strings.TrimSpace(s)
 
 	multiplier := int64(1)
 	switch {
@@ -135,12 +143,30 @@ func ParseWave(raw string) (int64, error) {
 		multiplier = 100000000
 		s = strings.TrimSuffix(s, "亿")
 	}
+	s = strings.TrimSpace(s)
+
+	// 兜底：截取开头的数字部分（与 parseInt 语义一致），应对未知尾巴
+	if idx := numericPrefixLen(s); idx >= 0 && idx < len(s) {
+		s = s[:idx]
+	}
 
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	if err != nil {
 		return 0, errors.New("音浪值无法解析: " + raw)
 	}
 	return int64(v * float64(multiplier)), nil
+}
+
+// numericPrefixLen 返回开头连续数字/小数点部分的长度；开头就不是数字返回 -1。
+func numericPrefixLen(s string) int {
+	i := 0
+	for i < len(s) && (unicode.IsDigit(rune(s[i])) || s[i] == '.') {
+		i++
+	}
+	if i == 0 {
+		return -1
+	}
+	return i
 }
 
 // ParseDuration 解析时长，统一换算为分钟。
