@@ -24,6 +24,7 @@ const (
 // ImportPreviewRow 预览的一行。
 type ImportPreviewRow struct {
 	Status   ImportRowStatus `json:"status"`
+	RawIndex int             `json:"rawIndex,omitempty"` // CSV 里的行号（表头算第 1 行），报告错误用
 	AnchorID string          `json:"anchorId"`
 	Name     string          `json:"name"`
 	PersonID *uint64         `json:"personId,omitempty"`
@@ -89,6 +90,8 @@ func (r *Repo) BuildImportPreview(ctx context.Context, rows []csvparse.Row,
 
 	for _, row := range rows {
 		pr := ImportPreviewRow{
+			Status:   StatusSkipped,
+			RawIndex: row.RawIndex,
 			AnchorID: row.AnchorID,
 			Name:     row.Name,
 			Rank:     row.Rank,

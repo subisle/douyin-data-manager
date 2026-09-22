@@ -134,9 +134,33 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 	validRows := len(preview.Rows) - preview.Skipped
 	matched := validRows - preview.Unmatched - preview.Duplicate
 	if matched <= 0 {
-		out.Text = fmt.Sprintf(
-			"文件已解析，但没有匹配到主播。有效行 %d，未匹配 %d。\n%s",
-			validRows, preview.Unmatched, addAnchorHint())
+		lines := []string{
+			fmt.Sprintf("文件已解析，但没有匹配到主播。有效行 %d，未匹配 %d，非法行 %d。",
+				validRows, preview.Unmatched, preview.Skipped),
+		}
+		// 非法行原因示例：帮运营自己看出问题（列名不认识 / 数值解析失败 / 缺 ID）
+		errSamples := make([]string, 0, 3)
+		seenErr := map[string]bool{}
+		for _, row := range preview.Rows {
+			if row.Err == "" || seenErr[row.Err] {
+				continue
+			}
+			seenErr[row.Err] = true
+			loc := ""
+			if row.RawIndex > 0 {
+				loc = fmt.Sprintf("第%d行：", row.RawIndex)
+			}
+			errSamples = append(errSamples, "· "+loc+row.Err)
+			if len(errSamples) >= 3 {
+				break
+			}
+		}
+		if len(errSamples) > 0 {
+			lines = append(lines, errSamples...)
+			lines = append(lines, "（以上是前几种错误示例）")
+		}
+		lines = append(lines, addAnchorHint())
+		out.Text = strings.Join(lines, "\n")
 		return out, nil
 	}
 
