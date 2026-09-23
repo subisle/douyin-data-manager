@@ -356,9 +356,8 @@ func (t *Transport) handleDispatch(ctx context.Context, eventType string, raw js
 	}
 }
 
-// Send 实现 bot.Transport。QQ 官方 API 发图必须提供公网可下载的 URL
-// （/files 接口不支持直传二进制），盒子在 NAT 后没有公网地址，
-// 所以图片暂时降级为文字提示；微信 iLink 通道可以发真图。
+// Send 实现 bot.Transport。图片走 /files 接口 file_data(base64) 直传拿
+// file_info，再用 msg_type=7 发富媒体消息（与 615 的 qq-bot.js 同款流程）。
 func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 	t.mu.RLock()
 	sc, ok := t.sessions[out.ConversationID]
@@ -367,22 +366,66 @@ func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 		return fmt.Errorf("找不到会话 %s 的回复上下文", out.ConversationID)
 	}
 
-	text := out.Text
-	hasImage := len(out.Image) > 0 || len(out.Images) > 0
-	if hasImage {
-		text = text + "\n（本条含榜单图片，QQ 通道暂不支持发图，请用微信查看）"
-	}
-
 	// 被动回复窗口只有几分钟，过期后就别带 msg_id 了（变成主动消息有频率限制）
 	msgID := sc.msgID
 	if time.Since(sc.at) > 4*time.Minute {
 		msgID = ""
 	}
 
-	if sc.groupOpenID != "" {
-		return t.client.SendToGroup(ctx, sc.groupOpenID, text, msgID, 0)
+	images := make([]bot.OutboundImage, 0, len(out.Images)+1)
+	images = append(images, out.Images...)
+	if len(out.Image) > 0 {
+		images = append(images, bot.OutboundImage{Data: out.Image, Name: out.ImageName})
 	}
-	return t.client.SendToUser(ctx, sc.userOpenID, text, msgID, 0)
+
+	if len(images) == 0 {
+		if out.Text == "" {
+			return nil
+		}
+		if sc.groupOpenID != "" {
+			return t.client.SendToGroup(ctx, sc.groupOpenID, out.Text, msgID, 0)
+		}
+		return t.client.SendToUser(ctx, sc.userOpenID, out.Text, msgID, 0)
+	}
+
+	// 先发文字说明，再逐张上传发图；单张失败不影响其余
+	if out.Text != "" {
+		var err error
+		if sc.groupOpenID != "" {
+			err = t.client.SendToGroup(ctx, sc.groupOpenID, out.Text, msgID, 0)
+		} else {
+			err = t.client.SendToUser(ctx, sc.userOpenID, out.Text, msgID, 0)
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	var firstErr error
+	for i, img := range images {
+		if err := t.sendImage(ctx, sc, img.Data, msgID); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("第 %d 张图片发送失败: %w", i+1, err)
+			}
+		}
+	}
+	return firstErr
+}
+
+// sendImage 上传并发送一张图片，按会话类型走群/私聊。
+func (t *Transport) sendImage(ctx context.Context, sc sessionCtx, data []byte, msgID string) error {
+	if sc.groupOpenID != "" {
+		fi, err := t.client.UploadGroupImage(ctx, sc.groupOpenID, data)
+		if err != nil {
+			return err
+		}
+		return t.client.SendGroupMedia(ctx, sc.groupOpenID, fi, msgID, 0)
+	}
+	fi, err := t.client.UploadC2cImage(ctx, sc.userOpenID, data)
+	if err != nil {
+		return err
+	}
+	return t.client.SendUserMedia(ctx, sc.userOpenID, fi, msgID, 0)
 }
 
 // Detail 前端展示状态。

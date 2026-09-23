@@ -12,6 +12,7 @@ package qq
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,6 +31,8 @@ const (
 	IntentGroupAndC2C = 1 << 25
 	// MsgTypeText 文本消息类型；7 是富媒体
 	MsgTypeText = 0
+	// MsgTypeMedia 富媒体消息（图/文件），media 里带 files 接口返回的 file_info
+	MsgTypeMedia = 7
 	// FileTypeImage 上传文件时的图片类型
 	FileTypeImage = 1
 )
@@ -250,6 +253,90 @@ func nextMsgSeq(provided int) int {
 		return provided
 	}
 	return int(time.Now().UnixNano()%900000) + 1000
+}
+
+/* ------------------------------- 富媒体发图 ------------------------------- */
+//
+// 照搬 615 shared/qqbot-adapter.js 的 uploadGroupFile/uploadC2cFile：
+// /files 接口支持 file_data（base64）直传，不需要公网 URL；
+// 拿到 file_info 后用 msg_type=7 发 media 消息。
+
+// uploadFile 上传媒体拿 file_info。path 是 /v2/groups/{id}/files 或 /v2/users/{id}/files。
+func (c *Client) uploadFile(ctx context.Context, path string, fileType int, fileData []byte) (string, error) {
+	if len(fileData) == 0 {
+		return "", fmt.Errorf("上传媒体内容为空")
+	}
+	body := map[string]any{
+		"file_type":    fileType,
+		"srv_send_msg": false,
+		"file_data":    base64.StdEncoding.EncodeToString(fileData),
+	}
+	out, err := c.doJSON(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return "", err
+	}
+	fi, _ := out["file_info"].(string)
+	if fi == "" {
+		if d, ok := out["data"].(map[string]any); ok {
+			fi, _ = d["file_info"].(string)
+		}
+	}
+	if fi == "" {
+		return "", fmt.Errorf("QQ 媒体上传成功但缺少 file_info")
+	}
+	return fi, nil
+}
+
+// UploadGroupImage 群图片上传，返回 file_info。
+func (c *Client) UploadGroupImage(ctx context.Context, groupOpenID string, data []byte) (string, error) {
+	if groupOpenID == "" {
+		return "", fmt.Errorf("缺少 group_openid")
+	}
+	return c.uploadFile(ctx, "/v2/groups/"+url.PathEscape(groupOpenID)+"/files", FileTypeImage, data)
+}
+
+// UploadC2cImage 私聊图片上传，返回 file_info。
+func (c *Client) UploadC2cImage(ctx context.Context, openID string, data []byte) (string, error) {
+	if openID == "" {
+		return "", fmt.Errorf("缺少 user openid")
+	}
+	return c.uploadFile(ctx, "/v2/users/"+url.PathEscape(openID)+"/files", FileTypeImage, data)
+}
+
+// SendGroupMedia 发群富媒体消息（msg_type=7）。
+func (c *Client) SendGroupMedia(ctx context.Context, groupOpenID, fileInfo, msgID string, msgSeq int) error {
+	if groupOpenID == "" {
+		return fmt.Errorf("缺少 group_openid")
+	}
+	body := map[string]any{
+		"msg_type": MsgTypeMedia,
+		"media":    map[string]any{"file_info": fileInfo},
+		"msg_seq":  nextMsgSeq(msgSeq),
+	}
+	if msgID != "" {
+		body["msg_id"] = msgID
+	}
+	_, err := c.doJSON(ctx, http.MethodPost,
+		"/v2/groups/"+url.PathEscape(groupOpenID)+"/messages", body)
+	return err
+}
+
+// SendUserMedia 发私聊富媒体消息（msg_type=7）。
+func (c *Client) SendUserMedia(ctx context.Context, openID, fileInfo, msgID string, msgSeq int) error {
+	if openID == "" {
+		return fmt.Errorf("缺少 user openid")
+	}
+	body := map[string]any{
+		"msg_type": MsgTypeMedia,
+		"media":    map[string]any{"file_info": fileInfo},
+		"msg_seq":  nextMsgSeq(msgSeq),
+	}
+	if msgID != "" {
+		body["msg_id"] = msgID
+	}
+	_, err := c.doJSON(ctx, http.MethodPost,
+		"/v2/users/"+url.PathEscape(openID)+"/messages", body)
+	return err
 }
 
 func trimSlash(s string) string {
