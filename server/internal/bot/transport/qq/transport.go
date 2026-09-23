@@ -356,8 +356,9 @@ func (t *Transport) handleDispatch(ctx context.Context, eventType string, raw js
 	}
 }
 
-// Send 实现 bot.Transport。QQ 的图片要先走 /files 上传拿 file_info，
-// 再用 msg_type=7 发；这一步待接入，当前先回文本。
+// Send 实现 bot.Transport。QQ 官方 API 发图必须提供公网可下载的 URL
+// （/files 接口不支持直传二进制），盒子在 NAT 后没有公网地址，
+// 所以图片暂时降级为文字提示；微信 iLink 通道可以发真图。
 func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 	t.mu.RLock()
 	sc, ok := t.sessions[out.ConversationID]
@@ -367,8 +368,9 @@ func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 	}
 
 	text := out.Text
-	if len(out.Image) > 0 {
-		text = text + "\n（图片发送待接入 /files 上传流程）"
+	hasImage := len(out.Image) > 0 || len(out.Images) > 0
+	if hasImage {
+		text = text + "\n（本条含榜单图片，QQ 通道暂不支持发图，请用微信查看）"
 	}
 
 	// 被动回复窗口只有几分钟，过期后就别带 msg_id 了（变成主动消息有频率限制）

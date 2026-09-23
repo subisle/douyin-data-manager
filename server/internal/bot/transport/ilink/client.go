@@ -343,11 +343,24 @@ func (c *Client) GetUpdates(ctx context.Context, cursor string, timeout time.Dur
 
 /* -------------------------------- 发消息 -------------------------------- */
 
+type outMedia struct {
+	EncryptQueryParam string `json:"encrypt_query_param"`
+	AesKey            string `json:"aes_key"`
+	EncryptType       int    `json:"encrypt_type"`
+}
+
+type outImageItem struct {
+	Media   outMedia `json:"media"`
+	MidSize int      `json:"mid_size"`
+	HdSize  int      `json:"hd_size"`
+}
+
 type outItem struct {
-	Type     int `json:"type"`
-	TextItem struct {
+	Type      int           `json:"type"`
+	TextItem  struct {
 		Text string `json:"text"`
-	} `json:"text_item"`
+	} `json:"text_item,omitempty"`
+	ImageItem *outImageItem `json:"image_item,omitempty"`
 }
 
 type outboundMsg struct {
@@ -368,7 +381,12 @@ type outboundMsg struct {
 func (c *Client) SendText(ctx context.Context, toUserID, groupID, contextToken, text string) error {
 	item := outItem{Type: 1}
 	item.TextItem.Text = text
+	return c.SendItems(ctx, toUserID, groupID, contextToken, []outItem{item})
+}
 
+// SendItems 发一条带任意 item 列表的消息（文本 / 图片混发，与 615 的
+// sendmessage 一致）。图片 item 由 uploadImage 生成。
+func (c *Client) SendItems(ctx context.Context, toUserID, groupID, contextToken string, items []outItem) error {
 	msg := outboundMsg{
 		FromUserID:   "",
 		ToUserID:     toUserID,
@@ -376,7 +394,7 @@ func (c *Client) SendText(ctx context.Context, toUserID, groupID, contextToken, 
 		MessageType:  2,
 		MessageState: 2,
 		ContextToken: contextToken,
-		ItemList:     []outItem{item},
+		ItemList:     items,
 		GroupID:      groupID,
 	}
 
@@ -385,6 +403,18 @@ func (c *Client) SendText(ctx context.Context, toUserID, groupID, contextToken, 
 		return err
 	}
 	return checkCode(out)
+}
+
+// GetUploadURL 换取媒体上传参数（对应 615 的 ilink/bot/getuploadurl）。
+func (c *Client) GetUploadURL(ctx context.Context, payload map[string]any) (map[string]any, error) {
+	out, err := c.postJSON(ctx, "getuploadurl", payload)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkCode(out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // clientID 幂等标识，服务端用它去重。

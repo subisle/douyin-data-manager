@@ -227,8 +227,8 @@ func (t *Transport) handleMessage(ctx context.Context, msg InboundMessage) {
 	}
 }
 
-// Send 实现 bot.Transport。图片以文字链接形式暂不可行，
-// 所以这里只发文本；出图需要先走 getuploadurl 上传拿 media_id（见 TODO）。
+// Send 实现 bot.Transport。文字直发；图片先走 getuploadurl + CDN 上传
+// （与 615 的 weixin-bot-media.js 同款流程），再以 type=2 的 item 发出。
 func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 	t.mu.RLock()
 	sc, ok := t.sessions[out.ConversationID]
@@ -237,15 +237,41 @@ func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 		return fmt.Errorf("找不到会话 %s 的回复上下文，无法发送", out.ConversationID)
 	}
 
-	text := out.Text
+	images := make([]bot.OutboundImage, 0, len(out.Images)+1)
+	images = append(images, out.Images...)
 	if len(out.Image) > 0 {
-		// TODO: 图片需先 POST getuploadurl 上传拿到 media_id，再以 type=2 的 item 发送
-		text = text + "\n（图片发送待接入 getuploadurl 上传流程）"
+		images = append(images, bot.OutboundImage{Data: out.Image, Name: out.ImageName})
 	}
 
-	if err := t.client.SendText(ctx, sc.toUserID, sc.groupId, sc.contextToken, text); err != nil {
-		return err
+	if len(images) == 0 {
+		if out.Text == "" {
+			return nil
+		}
+		if err := t.client.SendText(ctx, sc.toUserID, sc.groupId, sc.contextToken, out.Text); err != nil {
+			return err
+		}
+	} else {
+		// 先发文字说明，再逐张上传发送图片
+		if out.Text != "" {
+			if err := t.client.SendText(ctx, sc.toUserID, sc.groupId, sc.contextToken, out.Text); err != nil {
+				return err
+			}
+		}
+		for i, img := range images {
+			name := img.Name
+			if name == "" {
+				name = fmt.Sprintf("image-%d.png", i+1)
+			}
+			item, err := t.client.uploadImage(ctx, img.Data, sc.toUserID, name)
+			if err != nil {
+				return fmt.Errorf("上传 %s 失败: %w", name, err)
+			}
+			if err := t.client.SendItems(ctx, sc.toUserID, sc.groupId, sc.contextToken, []outItem{item}); err != nil {
+				return fmt.Errorf("发送 %s 失败: %w", name, err)
+			}
+		}
 	}
+
 	t.mu.Lock()
 	t.sent++
 	t.mu.Unlock()

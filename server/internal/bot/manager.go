@@ -36,6 +36,15 @@ type Outbound struct {
 	Text           string
 	Image          []byte
 	ImageName      string
+	// Images 多图（日报按性别各一张：女团样式1 + 男团样式2）。
+	// 通道按顺序逐张发送；Image 字段保留给单图场景，两者可并存。
+	Images []OutboundImage
+}
+
+// OutboundImage 一张待发送的图片。
+type OutboundImage struct {
+	Data []byte
+	Name string
 }
 
 // Transport 是 IM 通道的抽象。微信 iLink 与 QQ 开放平台各实现一份，
@@ -395,12 +404,12 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 	m.appendLog(LoggedMessage{
 		At: time.Now(), Channel: in.Channel, Dir: "out",
 		From: in.ConversationID, Text: out.Text, Intent: string(intent.Kind),
-		HasImage: len(out.Image) > 0,
+		HasImage: len(out.Image) > 0 || len(out.Images) > 0,
 	})
 	return out, nil
 }
 
-// buildDailyReport 复用导出渲染器生成日报 SVG。
+// buildDailyReport 复用导出渲染器生成日报 PNG（机器人发图用）。
 func (m *Manager) buildDailyReport(ctx context.Context, date time.Time, gender string) ([]byte, error) {
 	rows, err := m.repo.ListDailyByDate(ctx, date, domain.Gender(gender))
 	if err != nil {
@@ -425,7 +434,11 @@ func (m *Manager) buildDailyReport(ctx context.Context, date time.Time, gender s
 		Date: date.Format("2006-01-02"), Gender: gender, Rows: rr, Stats: rr,
 		Columns: render.DefaultColumns(), PageIndex: 1, PageCount: 1, ShowInactiveFooter: true,
 	}
-	return render.RenderSVG(report, render.ResolveStyle(gender, "")), nil
+	png, err := render.RenderPNG(report, render.ResolveStyle(gender, ""))
+	if err != nil {
+		return nil, fmt.Errorf("生成日报图片失败: %w", err)
+	}
+	return png, nil
 }
 
 func sumWave(rows []domain.MonthlyMetric) string {
