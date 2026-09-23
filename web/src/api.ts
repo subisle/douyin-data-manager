@@ -224,6 +224,8 @@ export interface AnchorPreviewRow {
   anchorId: string;
   douyinNo: string;
   name: string;
+  bound?: boolean;
+  boundTo?: string;
 }
 
 export interface AnchorImportResult {

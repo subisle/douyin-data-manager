@@ -455,6 +455,8 @@ func (s *Server) importAnchorsPreview(w http.ResponseWriter, r *http.Request) {
 		AnchorID string `json:"anchorId"`
 		DouyinNo string `json:"douyinNo"`
 		Name     string `json:"name"`
+		Bound    bool   `json:"bound"`           // 该号已在主播库中
+		BoundTo  string `json:"boundTo,omitempty"` // 绑给了谁
 	}
 	items := make([]item, 0, len(rows))
 	seen := map[string]bool{}
@@ -471,7 +473,15 @@ func (s *Server) importAnchorsPreview(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		seen[key] = true
-		items = append(items, item{RawIndex: row.RawIndex, AnchorID: row.AnchorID, DouyinNo: row.DouyinNo, Name: row.Name})
+		it := item{RawIndex: row.RawIndex, AnchorID: row.AnchorID, DouyinNo: row.DouyinNo, Name: row.Name}
+		// 已在库里的标记出来，前端默认隐藏，避免重复导入
+		if ownerID, err := s.repo.ResolveAnchorOwnerFlexible(r.Context(), id, ""); err == nil {
+			if p, perr := s.repo.GetPerson(r.Context(), ownerID); perr == nil {
+				it.Bound = true
+				it.BoundTo = p.Name
+			}
+		}
+		items = append(items, it)
 		if len(items) >= 500 {
 			break
 		}

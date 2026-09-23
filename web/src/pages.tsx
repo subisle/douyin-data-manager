@@ -147,11 +147,14 @@ function AnchorCsvImport({ onDone }: { onDone: () => void }) {
   const [items, setItems] = useState<(AnchorPreviewRow & { selected: boolean; customName: string })[]>([]);
   const [fileName, setFileName] = useState("");
   const [gender, setGender] = useState("female");
+  const [showBound, setShowBound] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [result, setResult] = useState<AnchorImportResult | null>(null);
 
-  const selected = items.filter((it) => it.selected);
+  const boundCount = items.filter((it) => it.bound).length;
+  const visible = showBound ? items : items.filter((it) => !it.bound);
+  const selected = items.filter((it) => it.selected && !it.bound);
   const patch = (idx: number, patchObj: Partial<{ selected: boolean; customName: string }>) =>
     setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, ...patchObj } : x)));
 
@@ -170,7 +173,7 @@ function AnchorCsvImport({ onDone }: { onDone: () => void }) {
       }
       text = text.replace(/^\uFEFF/, "");
       const preview = await api.previewAnchors(text);
-      setItems(preview.items.map((it) => ({ ...it, selected: true, customName: it.name })));
+      setItems(preview.items.map((it) => ({ ...it, selected: !it.bound, customName: it.name })));
     } catch (e) {
       setItems([]);
       setErr((e as Error).message);
@@ -218,7 +221,7 @@ function AnchorCsvImport({ onDone }: { onDone: () => void }) {
               <option value="male">男团</option>
               <option value="unknown">未标注</option>
             </select>
-            <button className="ghost" disabled={!items.length} onClick={() => setItems(items.map((it) => ({ ...it, selected: true })))}>
+            <button className="ghost" disabled={!items.length} onClick={() => setItems(items.map((it) => ({ ...it, selected: !it.bound })))}>
               全选
             </button>
             <button className="ghost" disabled={!items.length} onClick={() => setItems(items.map((it) => ({ ...it, selected: false })))}>
@@ -228,8 +231,16 @@ function AnchorCsvImport({ onDone }: { onDone: () => void }) {
 
           {fileName && (
             <p className="muted">
-              已解析 {fileName}：识别出 {items.length} 个主播，已勾选 {selected.length} 个。「导入名字」列可改成你想要的名字。
+              已解析 {fileName}：共 {items.length} 个主播，其中 {boundCount} 个已在库里（默认隐藏不重复导入），
+              待导入 {items.length - boundCount} 个，已勾选 {selected.length} 个。「导入名字」列可改成你想要的名字。
             </p>
+          )}
+          {boundCount > 0 && (
+            <div className="toolbar">
+              <label style={{ cursor: "pointer" }}>
+                <input type="checkbox" checked={showBound} onChange={(e) => setShowBound(e.target.checked)} /> 显示已在库中的
+              </label>
+            </div>
           )}
           {err && <p className="err">{err}</p>}
           {result && (
@@ -253,19 +264,31 @@ function AnchorCsvImport({ onDone }: { onDone: () => void }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((it, idx) => (
-                    <tr key={`${it.rawIndex}-${it.anchorId}`}>
-                      <td>
-                        <input type="checkbox" checked={it.selected} onChange={(e) => patch(idx, { selected: e.target.checked })} />
-                      </td>
-                      <td className="muted">{it.name}</td>
-                      <td>
-                        <input value={it.customName} onChange={(e) => patch(idx, { customName: e.target.value })} />
-                      </td>
-                      <td className="muted">{it.anchorId}</td>
-                      <td className="muted">{it.douyinNo || "—"}</td>
-                    </tr>
-                  ))}
+                  {visible.map((it) => {
+                    const idx = items.indexOf(it);
+                    return (
+                      <tr key={`${it.rawIndex}-${it.anchorId}`} style={it.bound ? { opacity: 0.5 } : undefined}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={it.selected && !it.bound}
+                            disabled={it.bound}
+                            onChange={(e) => patch(idx, { selected: e.target.checked })}
+                          />
+                        </td>
+                        <td className="muted">{it.name}</td>
+                        <td>
+                          {it.bound ? (
+                            <span className="muted">已在库中{it.boundTo ? `（绑给 ${it.boundTo}）` : ""}</span>
+                          ) : (
+                            <input value={it.customName} onChange={(e) => patch(idx, { customName: e.target.value })} />
+                          )}
+                        </td>
+                        <td className="muted">{it.anchorId}</td>
+                        <td className="muted">{it.douyinNo || "—"}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               <div className="toolbar" style={{ marginTop: 8 }}>
