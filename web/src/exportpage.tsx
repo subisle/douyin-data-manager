@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { NavParams } from "./nav";
 
 const todayLocal = () => {
   const d = new Date();
@@ -61,9 +62,9 @@ const DEFAULT_VISIBLE = ["rank", "name", "notLiveDays", "dailyWave", "totalWave"
  * 8 列自由勾选（默认排名/姓名/未播天数/日音浪/累计总音浪），
  * 女队用 classic 样式，男团用 apple 样式。
  */
-export function ExportPage() {
-  const [date, setDate] = useState(todayLocal());
-  const [gender, setGender] = useState("female");
+export function ExportPage({ params }: { params?: NavParams }) {
+  const [date, setDate] = useState(() => params?.date ?? todayLocal());
+  const [gender, setGender] = useState(() => params?.gender ?? "female");
   const [style, setStyle] = useState("auto");
   const [visible, setVisible] = useState<string[]>(DEFAULT_VISIBLE);
   const [svg, setSvg] = useState("");
@@ -77,13 +78,15 @@ export function ExportPage() {
     });
   };
 
-  const load = async () => {
+  const load = async (o?: { date?: string; gender?: string }) => {
+    const d = o?.date ?? date;
+    const g = o?.gender ?? gender;
     setBusy(true);
     setErr("");
     try {
       const usp = new URLSearchParams({
-        date,
-        gender,
+        date: d,
+        gender: g,
         style,
         // 列顺序按 615 的固定顺序输出，勾选只决定去留
         cols: ALL_COLUMNS.filter((c) => visible.includes(c.key)).map((c) => c.key).join(","),
@@ -103,6 +106,19 @@ export function ExportPage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 从日榜等页面带着日期/性别跳进来：直接按参数重新生成
+  const appliedNav = useRef("");
+  useEffect(() => {
+    if (!params?.date && !params?.gender) return;
+    const key = `${params.date ?? ""}|${params.gender ?? ""}`;
+    if (appliedNav.current === key) return;
+    appliedNav.current = key;
+    if (params.date) setDate(params.date);
+    if (params.gender) setGender(params.gender);
+    void load({ date: params.date, gender: params.gender });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params?.date, params?.gender]);
 
   const previewUrl = svg ? URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })) : "";
 

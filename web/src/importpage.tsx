@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { api, fmtWave, type PreviewResponse, type PreviewRow } from "./api";
+import { ImportLogsPage } from "./pages";
+import { useNav, type NavParams } from "./nav";
 
 const todayLocal = () => {
   const d = new Date();
@@ -31,15 +33,21 @@ const STATUS_CLASS: Record<string, string> = {
  *
  * 之所以多一步预览：覆盖已有数据是危险操作，必须先看清楚会发生什么。
  */
-export function ImportPage() {
+export function ImportPage({ params }: { params?: NavParams }) {
   const [file, setFile] = useState<File | null>(null);
-  const [date, setDate] = useState(todayLocal());
+  const [date, setDate] = useState(() => params?.date ?? todayLocal());
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [err, setErr] = useState("");
   const [done, setDone] = useState("");
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("all");
   const [dragging, setDragging] = useState(false);
+  const { navigate } = useNav();
+
+  // 别的页带日期跳进来（如清理完带日期回来看）
+  if (params?.date && params.date !== date) {
+    setDate(params.date);
+  }
 
   const runPreview = async (f: File | null) => {
     if (!f) return;
@@ -145,7 +153,16 @@ export function ImportPage() {
       </div>
 
       {err && <p className="err">{err}</p>}
-      {done && <p className="ok">{done}</p>}
+      {done && (
+        <>
+          <p className="ok">{done}</p>
+          <div className="toolbar">
+            <button className="ghost" onClick={() => navigate("daily", { date })}>
+              查看 {date} 日榜 →
+            </button>
+          </div>
+        </>
+      )}
       {preview?.duplicate && (
         <p className="muted">
           ℹ️ 该文件在 {preview.duplicate.import_date} 已导入过（{preview.duplicate.row_count} 行）。
@@ -213,6 +230,11 @@ export function ImportPage() {
         未入列表的行仍会导入（快照按 anchorId 存），但不会出现在日榜里——
         先到「主播管理」绑定抖音号，再回来导入。
       </div>
+
+      <details className="logs-fold">
+        <summary>导入日志（最近 100 条）</summary>
+        <ImportLogsPage />
+      </details>
     </div>
   );
 }

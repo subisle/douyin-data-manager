@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtMinutes, fmtWave, type AnchorImportResult, type AnchorPreviewRow, type ImportLogRow, type MonthlyRow, type Person, type YearlyRow } from "./api";
+import { useNav, type NavParams } from "./nav";
 
 // 统一的加载态封装：每个页面都要 loading / error / reload，别复制五遍。
 export function useLoad<T>(loader: () => Promise<T>, deps: unknown[]) {
@@ -34,6 +35,15 @@ const todayLocal = () => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
+const fmtDate = (d: Date) => {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+// 性别筛选是全站高频且语义一致的选项：记到 localStorage，切页/刷新不丢。
+const rememberedGender = () => localStorage.getItem("ui.gender") ?? "";
+const saveGender = (g: string) => localStorage.setItem("ui.gender", g);
+
 const medal = (i: number) =>
   i === 0 ? <span className="medal">🥇</span> : i === 1 ? <span className="medal">🥈</span> : i === 2 ? <span className="medal">🥉</span> : String(i + 1).padStart(2, "0");
 
@@ -53,6 +63,11 @@ export function PersonsPage() {
   const [gender, setGender] = useState("female");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [search, setSearch] = useState("");
+
+  const shown = (data ?? []).filter(
+    (p) => !search.trim() || p.name.toLowerCase().includes(search.trim().toLowerCase()),
+  );
 
   const create = async () => {
     if (!name.trim()) return;
@@ -88,9 +103,19 @@ export function PersonsPage() {
         <button onClick={create} disabled={busy || !name.trim()}>
           新增主播
         </button>
+        <span className="nav-divider" aria-hidden="true" />
+        <input
+          placeholder="搜索姓名…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ width: 140 }}
+        />
         <button className="ghost" onClick={() => void reload()}>
           刷新
         </button>
+        <span className="muted">
+          {data ? `共 ${data.length} 人` : ""}{shown.length !== (data?.length ?? 0) ? ` · 匹配 ${shown.length} 人` : ""}
+        </span>
         {msg && <span className="err">{msg}</span>}
       </div>
 
@@ -109,7 +134,7 @@ export function PersonsPage() {
           </tr>
         </thead>
         <tbody>
-          {(data ?? []).map((p) => (
+          {shown.map((p) => (
             <tr key={p.id}>
               <td className="muted">{p.id}</td>
               <td>{p.name}</td>
@@ -124,6 +149,13 @@ export function PersonsPage() {
               </td>
             </tr>
           ))}
+          {data && data.length > 0 && shown.length === 0 && (
+            <tr>
+              <td colSpan={7} className="muted">
+                没有匹配「{search}」的主播。
+              </td>
+            </tr>
+          )}
           {data && data.length === 0 && (
             <tr>
               <td colSpan={7} className="muted">
@@ -355,27 +387,73 @@ function BindAccount({ persons, onDone }: { persons: Person[]; onDone: () => voi
 
 /* -------------------------------- 日榜 -------------------------------- */
 
-export function DailyPage() {
-  const [date, setDate] = useState(todayLocal());
-  const [gender, setGender] = useState("");
+export function DailyPage({ params }: { params?: NavParams }) {
+  const [date, setDate] = useState(() => localStorage.getItem("ui.daily.date") ?? todayLocal());
+  const [gender, setGender] = useState(rememberedGender);
+  const { navigate } = useNav();
   const { data, error, loading } = useLoad(() => api.daily(date, gender || undefined), [date, gender]);
+
+  // 接收跨页跳转参数（导入页「查看日榜」、机器人页等带 date/gender 进来）
+  useEffect(() => {
+    if (params?.date) setDate(params.date);
+    if (params?.gender) {
+      setGender(params.gender);
+      saveGender(params.gender);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params?.date, params?.gender]);
+
+  useEffect(() => {
+    localStorage.setItem("ui.daily.date", date);
+  }, [date]);
+
+  const shift = (delta: number) => {
+    const d = new Date(date + "T00:00:00");
+    d.setDate(d.getDate() + delta);
+    setDate(fmtDate(d));
+  };
 
   const rows = data ?? [];
   const notLive = rows.filter((r) => !r.isLive).length;
+  const liveCount = rows.length - notLive;
 
   return (
     <div className="panel">
       <h3 style={{ marginTop: 0 }}>日榜</h3>
       <div className="toolbar">
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        <select value={gender} onChange={(e) => setGender(e.target.value)}>
+        <div className="quick-nav">
+          <button className="ghost" onClick={() => shift(-1)} title="前一天">
+            ‹
+          </button>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <button className="ghost" onClick={() => shift(1)} title="后一天">
+            ›
+          </button>
+          <button className="ghost" onClick={() => setDate(todayLocal())}>
+            今天
+          </button>
+        </div>
+        <select
+          value={gender}
+          onChange={(e) => {
+            setGender(e.target.value);
+            saveGender(e.target.value);
+          }}
+        >
           <option value="">全部</option>
           <option value="male">男团</option>
           <option value="female">女队</option>
         </select>
         <span className="muted">
-          共 {rows.length} 人 · 未开播 {notLive} 人
+          共 {rows.length} 人 · 开播 {liveCount} · 未开播 {notLive}
         </span>
+        <button
+          className="ghost"
+          onClick={() => navigate("export", { date, gender: gender === "male" ? "male" : "female" })}
+          title="带着当前日期和性别去导出页"
+        >
+          导出本榜图片 →
+        </button>
       </div>
 
       <Status loading={loading} error={error} />
@@ -430,10 +508,30 @@ export function DailyPage() {
 
 /* -------------------------------- 月榜 -------------------------------- */
 
-export function MonthlyPage() {
-  const [period, setPeriod] = useState(todayLocal().slice(0, 7));
-  const [gender, setGender] = useState("");
+export function MonthlyPage({ params }: { params?: NavParams }) {
+  const [period, setPeriod] = useState(() => localStorage.getItem("ui.monthly.period") ?? todayLocal().slice(0, 7));
+  const [gender, setGender] = useState(rememberedGender);
   const { data, error, loading } = useLoad(() => api.monthly(period, gender || undefined), [period, gender]);
+
+  useEffect(() => {
+    if (params?.period) setPeriod(params.period);
+    if (params?.gender) {
+      setGender(params.gender);
+      saveGender(params.gender);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params?.period, params?.gender]);
+
+  useEffect(() => {
+    localStorage.setItem("ui.monthly.period", period);
+  }, [period]);
+
+  const shiftMonth = (delta: number) => {
+    const [y, m] = period.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    const p = (n: number) => String(n).padStart(2, "0");
+    setPeriod(`${d.getFullYear()}-${p(d.getMonth() + 1)}`);
+  };
 
   const rows = (data ?? []) as MonthlyRow[];
   const totalWave = rows.reduce((s, r) => s + r.wave, 0);
@@ -443,8 +541,25 @@ export function MonthlyPage() {
     <div className="panel">
       <h3 style={{ marginTop: 0 }}>月榜（月音浪 · 月直播时长）</h3>
       <div className="toolbar">
-        <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} />
-        <select value={gender} onChange={(e) => setGender(e.target.value)}>
+        <div className="quick-nav">
+          <button className="ghost" onClick={() => shiftMonth(-1)} title="上个月">
+            ‹
+          </button>
+          <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} />
+          <button className="ghost" onClick={() => shiftMonth(1)} title="下个月">
+            ›
+          </button>
+          <button className="ghost" onClick={() => setPeriod(todayLocal().slice(0, 7))}>
+            本月
+          </button>
+        </div>
+        <select
+          value={gender}
+          onChange={(e) => {
+            setGender(e.target.value);
+            saveGender(e.target.value);
+          }}
+        >
           <option value="">全部</option>
           <option value="male">男团</option>
           <option value="female">女队</option>
@@ -499,10 +614,19 @@ export function MonthlyPage() {
 
 /* ------------------------------- 年度汇总 ------------------------------- */
 
-export function YearlyPage() {
+export function YearlyPage({ params }: { params?: NavParams }) {
   const [year, setYear] = useState(String(new Date().getFullYear()));
-  const [gender, setGender] = useState("");
+  const [gender, setGender] = useState(rememberedGender);
   const { data, error, loading } = useLoad(() => api.yearly(year, gender || undefined), [year, gender]);
+
+  useEffect(() => {
+    if (params?.year) setYear(params.year);
+    if (params?.gender) {
+      setGender(params.gender);
+      saveGender(params.gender);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params?.year, params?.gender]);
 
   const rows = (data ?? []) as YearlyRow[];
 
@@ -518,7 +642,13 @@ export function YearlyPage() {
           min={2000}
           max={9999}
         />
-        <select value={gender} onChange={(e) => setGender(e.target.value)}>
+        <select
+          value={gender}
+          onChange={(e) => {
+            setGender(e.target.value);
+            saveGender(e.target.value);
+          }}
+        >
           <option value="">全部</option>
           <option value="male">男团</option>
           <option value="female">女队</option>
@@ -569,92 +699,6 @@ export function YearlyPage() {
     </div>
   );
 }
-
-/* ------------------------------- 数据导入 ------------------------------- */
-
-const sample = {
-  date: todayLocal(),
-  source: "manual",
-  operator: "web",
-  waves: [{ anchorId: "ANCHOR_ID_1", waveValue: 123456, rank: 1 }],
-  durations: [{ anchorId: "ANCHOR_ID_1", minutes: 480 }],
-};
-
-export function ImportPage() {
-  const [payload, setPayload] = useState(JSON.stringify(sample, null, 2));
-  const [result, setResult] = useState("");
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    setBusy(true);
-    setErr("");
-    setResult("");
-    try {
-      let body: unknown;
-      try {
-        body = JSON.parse(payload);
-      } catch {
-        throw new Error("JSON 格式不对，检查一下括号和逗号");
-      }
-      const r = await api.importSnapshots(body);
-      setResult(
-        `导入成功：${r.imported} 条快照，覆盖 ${r.persons} 位主播` +
-          (r.skipped.length ? `；未识别的账号 ${r.skipped.length} 个：${r.skipped.join("、")}` : ""),
-      );
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const recompute = async () => {
-    setBusy(true);
-    setErr("");
-    try {
-      const r = await api.recompute({});
-      setResult(`已重算最近 30 天，共 ${r.persons} 位主播`);
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="panel">
-      <h3 style={{ marginTop: 0 }}>数据导入</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        平台给的是<b>累计</b>音浪和累计时长，后端会自动差分出日音浪。重复导入同一天会覆盖旧值，
-        导入完立即重算当天指标。
-      </p>
-
-      <textarea
-        value={payload}
-        onChange={(e) => setPayload(e.target.value)}
-        rows={14}
-        style={{ width: "100%", fontFamily: "ui-monospace, Menlo, Consolas, monospace", fontSize: 12 }}
-      />
-
-      <div className="toolbar" style={{ marginTop: 12 }}>
-        <button onClick={() => void submit()} disabled={busy}>
-          导入
-        </button>
-        <button className="ghost" onClick={() => void recompute()} disabled={busy}>
-          重算最近 30 天
-        </button>
-        {result && <span className="ok">{result}</span>}
-        {err && <span className="err">{err}</span>}
-      </div>
-
-      <div className="notice" style={{ marginTop: 12 }}>
-        anchorId 必须先在主播管理页绑定，否则该行会被跳过（导入结果里会列出）。
-      </div>
-    </div>
-  );
-}
-
 
 /* ------------------------------- 导入日志 ------------------------------- */
 

@@ -77,6 +77,65 @@ body {
   font-weight: 500;
 }
 
+/* 导航按语义分组，组间细分隔线 */
+.nav-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.nav-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 8px;
+  flex: 0 0 auto;
+}
+
+/* 日期/月份快捷翻页（‹ › 今天/本月） */
+.quick-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.quick-nav button {
+  padding: 6px 9px;
+}
+
+.quick-nav input {
+  width: 150px;
+}
+
+/* 导入日志折叠区 */
+.logs-fold {
+  margin-top: 16px;
+  border-top: 1px dashed var(--border);
+  padding-top: 10px;
+}
+
+.logs-fold > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  user-select: none;
+}
+
+.logs-fold > summary:hover {
+  color: var(--text);
+}
+
+.logs-fold[open] > summary {
+  margin-bottom: 8px;
+}
+
+.logs-fold section.panel {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
 /* ------------------------------ 面板 ------------------------------ */
 
 .panel {
@@ -278,6 +337,14 @@ tr.inactive td:first-child {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     gap: 6px;
+  }
+
+  .nav-group {
+    flex: 0 0 auto;
+  }
+
+  .nav-divider {
+    margin: 0 4px;
   }
 
   .tabs::-webkit-scrollbar {
