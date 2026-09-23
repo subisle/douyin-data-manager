@@ -357,7 +357,8 @@ func (r *Repo) ListDailyByDate(ctx context.Context, date time.Time, gender domai
 		query += " AND p.gender = ?"
 		args = append(args, string(gender))
 	}
-	query += " ORDER BY d.wave DESC, d.minutes DESC, p.name ASC"
+	// 排名按累计总音浪（当月 1 号至数据日的累加），其次当日音浪。
+	query += " ORDER BY cumulative_wave DESC, d.wave DESC, p.name ASC"
 
 	var out []domain.DailyMetric
 	if err := r.db.SelectContext(ctx, &out, query, args...); err != nil {
