@@ -335,8 +335,14 @@ func (r *Repo) upsertYearlyMetrics(ctx context.Context, rows []domain.YearlyMetr
 }
 
 // ListDailyByDate 取某天全团日榜，JOIN 出姓名与性别，供导出直接渲染。
+// cumulative_wave 不取快照原值，而是**当月 1 号至该日的日音浪总和**
+// （按人汇总全部账号）——日报「累计总音浪」列对齐 615 的月累计口径：
+// 运营说的「总音浪」= 1 号到数据日的累计，不是当日快照值。
 func (r *Repo) ListDailyByDate(ctx context.Context, date time.Time, gender domain.Gender) ([]domain.DailyMetric, error) {
-	query := `SELECT d.id, d.person_id, d.anchor_id, d.biz_date, d.wave, d.cumulative_wave,
+	query := `SELECT d.id, d.person_id, d.anchor_id, d.biz_date, d.wave,
+	                 (SELECT COALESCE(SUM(d2.wave), 0) FROM daily_metric d2
+	                   WHERE d2.person_id = d.person_id
+	                     AND d2.biz_date >= DATE_FORMAT(?, '%Y-%m-01') AND d2.biz_date <= ?) AS cumulative_wave,
 	                 d.prev_snapshot_date, d.wave_span, d.wave_reliable, d.minutes,
 	                 d.cumulative_minutes, d.minutes_span, d.minutes_reliable, d.is_live, d.tier,
 	                 p.name AS name, p.gender AS gender, m.name AS master_name
@@ -345,7 +351,7 @@ func (r *Repo) ListDailyByDate(ctx context.Context, date time.Time, gender domai
 	          LEFT JOIN person m ON m.id = p.master_id
 	          WHERE d.biz_date = ? AND p.deleted_at IS NULL AND p.status = 'active'
 	            AND p.hide_in_daily_report = 0`
-	args := []any{date}
+	args := []any{date, date, date}
 
 	if gender != "" {
 		query += " AND p.gender = ?"

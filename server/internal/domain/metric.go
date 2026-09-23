@@ -38,7 +38,9 @@ type DailyMetric struct {
 	AnchorID string    `db:"anchor_id"          json:"anchorId"`
 	BizDate  time.Time `db:"biz_date"           json:"bizDate"`
 
-	Wave              int64      `db:"wave"               json:"wave"`
+	Wave int64 `db:"wave" json:"wave"`
+	// CumulativeWave 存的是快照原值；但日报/导出场景（ListDailyByDate）
+	// 会用当月 1 号至该日的日音浪总和覆盖它——运营口径的「累计总音浪」。
 	CumulativeWave    int64      `db:"cumulative_wave"    json:"cumulativeWave"`
 	PrevSnapshotDate  *time.Time `db:"prev_snapshot_date" json:"prevSnapshotDate,omitempty"`
 	WaveSpan          int        `db:"wave_span"          json:"waveSpan"`
