@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"douyin-server/internal/csvparse"
 	"douyin-server/internal/domain"
 	"douyin-server/internal/repo"
 )
@@ -423,4 +425,124 @@ func (s *Server) syncFrom615(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// importAnchorsPreview POST /api/v1/persons/import-anchors/preview
+// 解析任意 CSV，提取主播身份列（主播 ID / 抖音号 / 姓名）供前端勾选。
+// 不限制 CSV 类型：榜单 CSV（如 创想1号到21号.csv）里的主播也能直接拿来建档。
+func (s *Server) importAnchorsPreview(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CSV string `json:"csv"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "请求体不是合法 JSON")
+		return
+	}
+	text := strings.TrimPrefix(req.CSV, "\uFEFF")
+	if strings.TrimSpace(text) == "" {
+		badRequest(w, "CSV 内容为空")
+		return
+	}
+
+	_, rows, err := csvparse.Parse(strings.NewReader(text))
+	if err != nil {
+		badRequest(w, "CSV 解析失败："+err.Error())
+		return
+	}
+
+	type item struct {
+		RawIndex int    `json:"rawIndex"`
+		AnchorID string `json:"anchorId"`
+		DouyinNo string `json:"douyinNo"`
+		Name     string `json:"name"`
+	}
+	items := make([]item, 0, len(rows))
+	seen := map[string]bool{}
+	for _, row := range rows {
+		id := row.AnchorID
+		if id == "" {
+			id = row.DouyinNo
+		}
+		if row.Name == "" || id == "" {
+			continue
+		}
+		key := id + "|" + row.Name
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		items = append(items, item{RawIndex: row.RawIndex, AnchorID: row.AnchorID, DouyinNo: row.DouyinNo, Name: row.Name})
+		if len(items) >= 500 {
+			break
+		}
+	}
+	if len(items) == 0 {
+		badRequest(w, "CSV 里没有能识别出「姓名 + 主播ID/抖音号」的行")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"count": len(items), "items": items})
+}
+
+// importAnchors POST /api/v1/persons/import-anchors
+// 批量建档/绑号。规则与 bot「姓名-抖音号」一致：号已绑跳过、重名加副号、新名建档。
+func (s *Server) importAnchors(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Gender domain.Gender `json:"gender"`
+		Items  []struct {
+			Name     string `json:"name"`
+			AnchorID string `json:"anchorId"`
+			DouyinNo string `json:"douyinNo"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "请求体不是合法 JSON")
+		return
+	}
+	if req.Gender == "" {
+		req.Gender = domain.GenderUnknown
+	}
+	if !req.Gender.Valid() {
+		badRequest(w, "gender 只能是 male / female / unknown")
+		return
+	}
+	if len(req.Items) == 0 {
+		badRequest(w, "items 不能为空")
+		return
+	}
+	if len(req.Items) > 500 {
+		badRequest(w, "单次最多导入 500 行，请分批")
+		return
+	}
+
+	type detail struct {
+		Name  string `json:"name"`
+		ID    string `json:"id"`
+		Owner string `json:"owner,omitempty"`
+		Error string `json:"error,omitempty"`
+	}
+	var created, bound, already, failed int
+	var alreadyList, failedList []detail
+	for _, it := range req.Items {
+		action, personName, err := s.repo.UpsertAnchorAccount(r.Context(), it.Name, it.AnchorID, it.DouyinNo, req.Gender)
+		if err != nil {
+			failed++
+			failedList = append(failedList, detail{Name: it.Name, ID: it.AnchorID, Error: err.Error()})
+			continue
+		}
+		switch action {
+		case "created":
+			created++
+		case "bound":
+			bound++
+		default:
+			already++
+			if len(alreadyList) < 10 {
+				alreadyList = append(alreadyList, detail{Name: it.Name, ID: it.AnchorID, Owner: personName})
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"created": created, "bound": bound, "already": already, "failed": failed,
+		"alreadyDetail": alreadyList, "failedDetail": failedList,
+	})
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, fmtMinutes, fmtWave, type ImportLogRow, type MonthlyRow, type Person, type YearlyRow } from "./api";
+import { api, fmtMinutes, fmtWave, type AnchorImportResult, type AnchorPreviewRow, type ImportLogRow, type MonthlyRow, type Person, type YearlyRow } from "./api";
 
 // 统一的加载态封装：每个页面都要 loading / error / reload，别复制五遍。
 export function useLoad<T>(loader: () => Promise<T>, deps: unknown[]) {
@@ -135,7 +135,149 @@ export function PersonsPage() {
       </table>
 
       <BindAccount onDone={() => void reload()} persons={data ?? []} />
+      <AnchorCsvImport onDone={() => void reload()} />
     </div>
+  );
+}
+
+// 从 CSV 批量导入主播：选文件 → 预览勾选（多选）→ 每行可改自定义名字 → 建档绑号。
+// 榜单 CSV（带音浪列的）也能用：只提取「主播 ID / 抖音号 / 姓名」身份列。
+function AnchorCsvImport({ onDone }: { onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<(AnchorPreviewRow & { selected: boolean; customName: string })[]>([]);
+  const [fileName, setFileName] = useState("");
+  const [gender, setGender] = useState("female");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [result, setResult] = useState<AnchorImportResult | null>(null);
+
+  const selected = items.filter((it) => it.selected);
+  const patch = (idx: number, patchObj: Partial<{ selected: boolean; customName: string }>) =>
+    setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, ...patchObj } : x)));
+
+  const onFile = async (file: File | null) => {
+    if (!file) return;
+    setErr("");
+    setResult(null);
+    setFileName(file.name);
+    try {
+      const buf = await file.arrayBuffer();
+      let text: string;
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+      } catch {
+        text = new TextDecoder("gb18030").decode(buf);
+      }
+      text = text.replace(/^\uFEFF/, "");
+      const preview = await api.previewAnchors(text);
+      setItems(preview.items.map((it) => ({ ...it, selected: true, customName: it.name })));
+    } catch (e) {
+      setItems([]);
+      setErr((e as Error).message);
+    }
+  };
+
+  const run = async () => {
+    if (!selected.length) return;
+    setBusy(true);
+    setErr("");
+    setResult(null);
+    try {
+      const res = await api.importAnchors(
+        gender,
+        selected.map((it) => ({
+          name: it.customName.trim() || it.name,
+          anchorId: it.anchorId,
+          douyinNo: it.douyinNo || it.anchorId,
+        })),
+      );
+      setResult(res);
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="toolbar" style={{ marginTop: 12 }}>
+        <button className="ghost" onClick={() => setOpen(!open)}>
+          {open ? "收起 CSV 导入" : "从 CSV 导入主播"}
+        </button>
+        <span className="muted">从榜单/名单 CSV 里勾选主播批量建档，名字可改。</span>
+      </div>
+
+      {open && (
+        <div className="panel" style={{ marginTop: 8 }}>
+          <div className="toolbar">
+            <input type="file" accept=".csv,text/csv" onChange={(e) => void onFile(e.target.files?.[0] ?? null)} />
+            <select value={gender} onChange={(e) => setGender(e.target.value)}>
+              <option value="female">女队</option>
+              <option value="male">男团</option>
+              <option value="unknown">未标注</option>
+            </select>
+            <button className="ghost" disabled={!items.length} onClick={() => setItems(items.map((it) => ({ ...it, selected: true })))}>
+              全选
+            </button>
+            <button className="ghost" disabled={!items.length} onClick={() => setItems(items.map((it) => ({ ...it, selected: false })))}>
+              全不选
+            </button>
+          </div>
+
+          {fileName && (
+            <p className="muted">
+              已解析 {fileName}：识别出 {items.length} 个主播，已勾选 {selected.length} 个。「导入名字」列可改成你想要的名字。
+            </p>
+          )}
+          {err && <p className="err">{err}</p>}
+          {result && (
+            <p className="muted">
+              导入完成：新建 {result.created} 人，已有主播加号 {result.bound} 个，重复跳过 {result.already} 条，失败 {result.failed} 条。
+              {result.alreadyDetail.map((d) => `「${d.id}」已绑给 ${d.owner}`).join("；")}
+              {result.failedDetail.map((d) => `「${d.name}」失败：${d.error}`).join("；")}
+            </p>
+          )}
+
+          {items.length > 0 && (
+            <>
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: 44 }}>选</th>
+                    <th>CSV 原名</th>
+                    <th>导入名字（可改）</th>
+                    <th>主播 ID</th>
+                    <th>抖音号</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((it, idx) => (
+                    <tr key={`${it.rawIndex}-${it.anchorId}`}>
+                      <td>
+                        <input type="checkbox" checked={it.selected} onChange={(e) => patch(idx, { selected: e.target.checked })} />
+                      </td>
+                      <td className="muted">{it.name}</td>
+                      <td>
+                        <input value={it.customName} onChange={(e) => patch(idx, { customName: e.target.value })} />
+                      </td>
+                      <td className="muted">{it.anchorId}</td>
+                      <td className="muted">{it.douyinNo || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="toolbar" style={{ marginTop: 8 }}>
+                <button onClick={run} disabled={busy || !selected.length}>
+                  {busy ? "导入中…" : `导入所选（${selected.length}）`}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 

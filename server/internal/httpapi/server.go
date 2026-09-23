@@ -44,6 +44,10 @@ func New(r *repo.Repo, b *bot.Manager, cfg config.Config, log *slog.Logger) *Ser
 	s.mux.HandleFunc("POST /api/v1/persons/batch-delete", s.batchDeletePersons)
 	s.mux.HandleFunc("POST /api/v1/persons/sync-615", s.syncFrom615)
 	s.mux.HandleFunc("GET /api/v1/persons/duplicates", s.duplicatePersons)
+
+	// 网页端主播 CSV 批量导入：先预览（提取姓名+ID 供勾选），再批量建档
+	s.mux.HandleFunc("POST /api/v1/persons/import-anchors/preview", s.importAnchorsPreview)
+	s.mux.HandleFunc("POST /api/v1/persons/import-anchors", s.importAnchors)
 	s.mux.HandleFunc("POST /api/v1/persons/merge", s.mergePersons)
 	s.mux.HandleFunc("PATCH /api/v1/persons/{id}/master", s.setMaster)
 	s.mux.HandleFunc("POST /api/v1/persons/{id}/snapshot", s.saveSnapshot)

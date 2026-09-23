@@ -218,6 +218,23 @@ export interface ImportLogRow {
   created_at: string;
 }
 
+// 主播 CSV 批量导入
+export interface AnchorPreviewRow {
+  rawIndex: number;
+  anchorId: string;
+  douyinNo: string;
+  name: string;
+}
+
+export interface AnchorImportResult {
+  created: number;
+  bound: number;
+  already: number;
+  failed: number;
+  alreadyDetail: { name: string; id: string; owner?: string }[];
+  failedDetail: { name: string; id: string; error: string }[];
+}
+
 export const api = {
   listImportLogs: (limit = 100) =>
     request<ImportLogRow[]>(`/imports/logs?limit=${limit}`),
@@ -227,6 +244,18 @@ export const api = {
 
   createPerson: (body: Partial<Person>) =>
     request<Person>("/persons", { method: "POST", body: JSON.stringify(body) }),
+
+  previewAnchors: (csv: string) =>
+    request<{ count: number; items: AnchorPreviewRow[] }>("/persons/import-anchors/preview", {
+      method: "POST",
+      body: JSON.stringify({ csv }),
+    }),
+
+  importAnchors: (gender: string, items: { name: string; anchorId: string; douyinNo: string }[]) =>
+    request<AnchorImportResult>("/persons/import-anchors", {
+      method: "POST",
+      body: JSON.stringify({ gender, items }),
+    }),
 
   updatePerson: (id: number, body: Partial<Person>) =>
     request<Person>(`/persons/${id}`, { method: "PATCH", body: JSON.stringify(body) }),

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -279,4 +280,76 @@ func (r *Repo) ListTierRules(ctx context.Context, scope domain.TierScope) ([]dom
 		return nil, fmt.Errorf("查询等级规则: %w", err)
 	}
 	return out, nil
+}
+
+// UpsertAnchorAccount 建档/绑号的共用核心（bot「姓名-抖音号」与网页 CSV 批量导入共用）。
+// anchorID 为主播 ID（长数字），douyinNo 为抖音号；缺一个用另一个顶替。
+// 返回 action：
+//   - "created"：新建主播 + 主账号
+//   - "bound"：姓名已存在 → 给已有主播加副号
+//   - "already"：号已绑（anchor_id 或 douyin_no 命中）→ 不动，personName 为号的主人
+func (r *Repo) UpsertAnchorAccount(ctx context.Context, name, anchorID, douyinNo string, gender domain.Gender) (action, personName string, err error) {
+	if strings.TrimSpace(name) == "" {
+		return "", "", errors.New("姓名为空")
+	}
+	if anchorID == "" && douyinNo == "" {
+		return "", "", errors.New("缺少主播 ID / 抖音号")
+	}
+	if douyinNo == "" {
+		douyinNo = anchorID
+	}
+	if anchorID == "" {
+		anchorID = douyinNo
+	}
+
+	// 号已绑给别人 → 不偷偷改绑
+	keys := []string{anchorID}
+	if douyinNo != anchorID {
+		keys = append(keys, douyinNo)
+	}
+	for _, key := range keys {
+		if ownerID, err := r.ResolveAnchorOwnerFlexible(ctx, key, ""); err == nil {
+			if p, perr := r.GetPerson(ctx, ownerID); perr == nil {
+				return "already", p.Name, nil
+			}
+		}
+	}
+
+	persons, err := r.FindPersonsByName(ctx, name)
+	if err != nil {
+		return "", "", err
+	}
+	isPrimary := true
+	var person domain.Person
+	if len(persons) > 0 {
+		isPrimary = false
+		person = persons[0]
+	} else {
+		p := &domain.Person{Name: name, Gender: gender, Status: domain.PersonStatusActive}
+		if err := r.CreatePerson(ctx, p); err != nil {
+			return "", "", err
+		}
+		persons, err = r.FindPersonsByName(ctx, name)
+		if err != nil {
+			return "", "", err
+		}
+		if len(persons) != 1 {
+			return "", "", fmt.Errorf("新建主播「%s」后查询异常（命中 %d 条）", name, len(persons))
+		}
+		person = persons[0]
+	}
+	if err := r.BindAccount(ctx, &domain.Account{
+		PersonID:   person.ID,
+		AnchorID:   anchorID,
+		DouyinNo:   douyinNo,
+		AnchorName: name,
+		IsPrimary:  isPrimary,
+		Status:     "active",
+	}); err != nil {
+		return "", "", fmt.Errorf("绑定账号: %w", err)
+	}
+	if isPrimary {
+		return "created", person.Name, nil
+	}
+	return "bound", person.Name, nil
 }
