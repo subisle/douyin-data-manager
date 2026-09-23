@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"douyin-server/internal/bot"
@@ -84,16 +85,24 @@ func New(r *repo.Repo, b *bot.Manager, cfg config.Config, log *slog.Logger) *Ser
 
 // ServeStatic 把前端构建产物挂在根路径，用于单容器部署。
 // 带 SPA 回退：找不到静态文件时返回 index.html，否则刷新子路由会 404。
+// 缓存策略：index.html（含 SPA 回退）no-cache，保证部署后浏览器立刻拿新版；
+// /assets/* 文件名带内容哈希，immutable 长缓存。
 func (s *Server) ServeStatic(dir string) {
 	fs := http.FileServer(http.Dir(dir))
 	s.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
-			if _, err := os.Stat(filepath.Join(dir, filepath.Clean(r.URL.Path))); err != nil {
-				http.ServeFile(w, r, filepath.Join(dir, "index.html"))
+			if _, err := os.Stat(filepath.Join(dir, filepath.Clean(r.URL.Path))); err == nil {
+				// 磁盘上真实存在的文件：带哈希的构建产物可以永久缓存
+				if strings.HasPrefix(r.URL.Path, "/assets/") {
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				}
+				fs.ServeHTTP(w, r)
 				return
 			}
 		}
-		fs.ServeHTTP(w, r)
+		// "/" 或 SPA 回退 → index.html，浏览器每次都需回源验证
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, r, filepath.Join(dir, "index.html"))
 	}))
 }
 
