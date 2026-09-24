@@ -486,7 +486,8 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 }
 
 // botDailyPageSize 每张日报图的行数上限，与网页导出接口的默认值一致。
-const botDailyPageSize = 30
+// 50 行/页：男团 90+ 人两张，女团一张——30 行会切成 4 张，太碎。
+const botDailyPageSize = 50
 
 // buildDailyReportImages 生成日报图：女团一张（经典样式），男团按人数分页
 // （苹果样式，超过 botDailyPageSize 行自动切成多张，页脚带 N/M）。

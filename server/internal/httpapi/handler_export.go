@@ -35,9 +35,10 @@ func (s *Server) exportReport(w http.ResponseWriter, r *http.Request) {
 		return // normalizeGender 已经写了错误响应
 	}
 
-	pageSize := queryInt(r.URL.Query().Get("pageSize"), 30)
+	// 50 行/页：男团 90+ 人刚好两张，女团一张——运营反馈 30/页切太碎。
+	pageSize := queryInt(r.URL.Query().Get("pageSize"), 50)
 	if pageSize < 1 {
-		pageSize = 30
+		pageSize = 50
 	}
 	if pageSize > 100 {
 		pageSize = 100
