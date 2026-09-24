@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -98,6 +99,51 @@ func (r *Repo) UpsertDurationSnapshots(ctx context.Context, batchID uint64, rows
 		return fmt.Errorf("提交时长快照: %w", err)
 	}
 	return nil
+}
+
+// backfillOrphanSnapshots 把该账号导入时留下的"无主"快照（person_id IS NULL）
+// 归到 personID 名下。这些是「先导数据、后加主播」留下的：导入时人还没建档，
+// 数据照存但不进榜；绑号回填后重算，历史自动出现在榜上。
+// 返回受影响的最早/最晚数据日与是否有变更，供调用方重算三层指标。
+func (r *Repo) backfillOrphanSnapshots(ctx context.Context, anchorID string, personID uint64) (time.Time, time.Time, bool, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE wave_snapshot SET person_id = ? WHERE anchor_id = ? AND person_id IS NULL`,
+		personID, anchorID)
+	if err != nil {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("回填音浪快照: %w", err)
+	}
+	n1, _ := res.RowsAffected()
+
+	res, err = r.db.ExecContext(ctx,
+		`UPDATE duration_snapshot SET person_id = ? WHERE anchor_id = ? AND person_id IS NULL`,
+		personID, anchorID)
+	if err != nil {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("回填时长快照: %w", err)
+	}
+	n2, _ := res.RowsAffected()
+
+	if n1+n2 == 0 {
+		return time.Time{}, time.Time{}, false, nil
+	}
+
+	// 两张表各取一次 min/max：回填范围以实际覆盖到的数据日为准。
+	// 只有一张表有数时（比如只导过音浪），缺的那张 MIN/MAX 为 NULL。
+	var from, to time.Time
+	for _, table := range []string{"wave_snapshot", "duration_snapshot"} {
+		var f, t sql.NullTime
+		if err := r.db.QueryRowxContext(ctx,
+			"SELECT MIN(biz_date), MAX(biz_date) FROM "+table+" WHERE anchor_id = ? AND person_id = ?",
+			anchorID, personID).Scan(&f, &t); err != nil {
+			return time.Time{}, time.Time{}, false, fmt.Errorf("查询回填范围(%s): %w", table, err)
+		}
+		if f.Valid && (from.IsZero() || f.Time.Before(from)) {
+			from = f.Time
+		}
+		if t.Valid && t.Time.After(to) {
+			to = t.Time
+		}
+	}
+	return from, to, true, nil
 }
 
 // listWaveSnapshotsOfAnchors 取若干账号的全部音浪快照（按账号+日期升序）。

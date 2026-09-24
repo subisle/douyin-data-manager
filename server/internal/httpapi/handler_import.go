@@ -93,7 +93,7 @@ func (s *Server) importSnapshots(w http.ResponseWriter, r *http.Request) {
 		}
 		waves = append(waves, domain.WaveSnapshot{
 			AnchorID:    item.AnchorID,
-			PersonID:    personID,
+			PersonID:    &personID,
 			BizDate:     date,
 			WaveValue:   item.WaveValue,
 			RankInGuild: item.Rank,
@@ -118,7 +118,7 @@ func (s *Server) importSnapshots(w http.ResponseWriter, r *http.Request) {
 		}
 		durations = append(durations, domain.DurationSnapshot{
 			AnchorID:          item.AnchorID,
-			PersonID:          personID,
+			PersonID:          &personID,
 			BizDate:           date,
 			CumulativeMinutes: item.Minutes,
 		})

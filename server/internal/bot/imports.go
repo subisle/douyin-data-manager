@@ -129,39 +129,26 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 		return out, fmt.Errorf("构建导入预览: %w", err)
 	}
 
-	// 一行都没匹配到：直接说清楚，不写库（615 同款）。
 	// 「有效行」= 解析出数据行的数量（非法行另列），与 615 文案口径一致。
 	validRows := len(preview.Rows) - preview.Skipped
 	matched := validRows - preview.Unmatched - preview.Duplicate
-	if matched <= 0 {
-		lines := []string{
-			fmt.Sprintf("文件已解析，但没有匹配到主播。有效行 %d，未匹配 %d，非法行 %d。",
-				validRows, preview.Unmatched, preview.Skipped),
+
+	// 非法行原因示例：帮运营自己看出问题（列名不认识 / 数值解析失败 / 缺 ID）
+	errSamples := make([]string, 0, 3)
+	seenErr := map[string]bool{}
+	for _, row := range preview.Rows {
+		if row.Err == "" || seenErr[row.Err] {
+			continue
 		}
-		// 非法行原因示例：帮运营自己看出问题（列名不认识 / 数值解析失败 / 缺 ID）
-		errSamples := make([]string, 0, 3)
-		seenErr := map[string]bool{}
-		for _, row := range preview.Rows {
-			if row.Err == "" || seenErr[row.Err] {
-				continue
-			}
-			seenErr[row.Err] = true
-			loc := ""
-			if row.RawIndex > 0 {
-				loc = fmt.Sprintf("第%d行：", row.RawIndex)
-			}
-			errSamples = append(errSamples, "· "+loc+row.Err)
-			if len(errSamples) >= 3 {
-				break
-			}
+		seenErr[row.Err] = true
+		loc := ""
+		if row.RawIndex > 0 {
+			loc = fmt.Sprintf("第%d行：", row.RawIndex)
 		}
-		if len(errSamples) > 0 {
-			lines = append(lines, errSamples...)
-			lines = append(lines, "（以上是前几种错误示例）")
+		errSamples = append(errSamples, "· "+loc+row.Err)
+		if len(errSamples) >= 3 {
+			break
 		}
-		lines = append(lines, addAnchorHint())
-		out.Text = strings.Join(lines, "\n")
-		return out, nil
 	}
 
 	batchID, err := m.repo.CreateBatch(ctx, date, "csv", "bot:"+in.Channel)
@@ -236,13 +223,18 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 			friendlyDate(date.Format("2006-01-02")))
 	}
 	lines := []string{
-		fmt.Sprintf("已导入 %s 的%s数据%s：%d 条；未匹配 %d 条，重复行 %d 条，非法行 %d 条。",
+		fmt.Sprintf("已导入 %s 的%s数据%s：%d 条；未匹配 %d 条（已存档），重复行 %d 条，非法行 %d 条。",
 			friendlyDate(date.Format("2006-01-02")), label, sourceHint,
 			affected, preview.Unmatched, preview.Duplicate, preview.Skipped),
 	}
-	// 有未匹配的行：引导用「姓名-抖音号」补录，补完重发文件
+	// 有未匹配的行：数据已经存了，之后一绑号就会自动算出来显示
 	if preview.Unmatched > 0 {
+		lines = append(lines, fmt.Sprintf("未匹配的 %d 条已存档，名单里还没有这些人；之后发「姓名-抖音号」加上，历史数据会自动显示。", preview.Unmatched))
 		lines = append(lines, addAnchorHint())
+	}
+	if len(errSamples) > 0 {
+		lines = append(lines, errSamples...)
+		lines = append(lines, "（以上是前几种非法行示例）")
 	}
 	if pending != nil {
 		got := map[string]bool{}
@@ -274,7 +266,7 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 		}
 	}
 	if len(skipped) > 0 && len(skipped) < 6 {
-		lines = append(lines, "未入库账号："+strings.Join(skipped, "、"))
+		lines = append(lines, "非法未入库账号："+strings.Join(skipped, "、"))
 	}
 	out.Text = strings.Join(lines, "\n")
 	return out, nil

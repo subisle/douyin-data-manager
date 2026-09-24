@@ -146,8 +146,9 @@ func (r *Repo) BuildImportPreview(ctx context.Context, rows []csvparse.Row,
 }
 
 // ApplyImport 把预览确认过的行写入快照。
-// 只写能匹配到主播的行，未匹配的跳过（与 615 一致：列表里没有的仍然导入，
-// 但这里没有 person_id 无法落库，所以跳过并在结果里返回）。
+// 未匹配的行也照写，person_id 留 NULL——数据先存着不显示，
+// 之后绑定账号时回填归属并重算，历史自动出现在榜上。
+// 真正跳过的只有非法行（解析失败）与文件内重复行。
 func (r *Repo) ApplyImport(ctx context.Context, rows []ImportPreviewRow,
 	kind csvparse.Kind, bizDate time.Time, batchID uint64) (int, []string, error) {
 
@@ -155,7 +156,7 @@ func (r *Repo) ApplyImport(ctx context.Context, rows []ImportPreviewRow,
 	skipped := []string{}
 
 	for _, row := range rows {
-		if row.Status == StatusSkipped || row.Status == StatusDuplicate || row.PersonID == nil {
+		if row.Status == StatusSkipped || row.Status == StatusDuplicate {
 			if row.AnchorID != "" {
 				skipped = append(skipped, row.AnchorID)
 			}
@@ -166,7 +167,7 @@ func (r *Repo) ApplyImport(ctx context.Context, rows []ImportPreviewRow,
 		}
 		waves = append(waves, domain.WaveSnapshot{
 			AnchorID:    row.AnchorID,
-			PersonID:    *row.PersonID,
+			PersonID:    row.PersonID, // 未匹配 → NULL，绑号后回填
 			BizDate:     bizDate,
 			WaveValue:   row.Next,
 			RankInGuild: row.Rank,
@@ -179,18 +180,18 @@ func (r *Repo) ApplyImport(ctx context.Context, rows []ImportPreviewRow,
 	return len(waves), skipped, nil
 }
 
-// ApplyDurationImport 写入时长快照（分钟）。
+// ApplyDurationImport 写入时长快照（分钟）。未匹配行同样入库留空归属。
 func (r *Repo) ApplyDurationImport(ctx context.Context, rows []ImportPreviewRow,
 	bizDate time.Time, batchID uint64) (int, error) {
 
 	durations := make([]domain.DurationSnapshot, 0)
 	for _, row := range rows {
-		if row.Status == StatusSkipped || row.Status == StatusDuplicate || row.PersonID == nil {
+		if row.Status == StatusSkipped || row.Status == StatusDuplicate {
 			continue
 		}
 		durations = append(durations, domain.DurationSnapshot{
 			AnchorID:          row.AnchorID,
-			PersonID:          *row.PersonID,
+			PersonID:          row.PersonID,
 			BizDate:           bizDate,
 			CumulativeMinutes: int(row.Next),
 		})

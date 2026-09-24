@@ -9,10 +9,12 @@ import (
 // 前端不需要走字符串方案，少一层转换就少一处出错点。
 
 // WaveSnapshot 平台累计音浪快照。只增不改，是差分的事实来源。
+// PersonID 可为 NULL：导入时主播还没建档的行照常入库（不进榜），
+// 绑号后回填并重算，历史数据自动显示。
 type WaveSnapshot struct {
 	ID          uint64    `db:"id"            json:"id"`
 	AnchorID    string    `db:"anchor_id"     json:"anchorId"`
-	PersonID    uint64    `db:"person_id"     json:"personId"`
+	PersonID    *uint64   `db:"person_id"     json:"personId,omitempty"`
 	BizDate     time.Time `db:"biz_date"      json:"bizDate"`
 	WaveValue   int64     `db:"wave_value"    json:"waveValue"`
 	RankInGuild *int      `db:"rank_in_guild" json:"rankInGuild,omitempty"`
@@ -20,11 +22,11 @@ type WaveSnapshot struct {
 	CreatedAt   time.Time `db:"created_at"    json:"createdAt"`
 }
 
-// DurationSnapshot 平台累计直播时长快照（分钟）。
+// DurationSnapshot 平台累计直播时长快照（分钟）。PersonID 可为 NULL，同上。
 type DurationSnapshot struct {
 	ID                uint64    `db:"id"                 json:"id"`
 	AnchorID          string    `db:"anchor_id"          json:"anchorId"`
-	PersonID          uint64    `db:"person_id"          json:"personId"`
+	PersonID          *uint64   `db:"person_id"          json:"personId,omitempty"`
 	BizDate           time.Time `db:"biz_date"           json:"bizDate"`
 	CumulativeMinutes int       `db:"cumulative_minutes" json:"cumulativeMinutes"`
 	BatchID           *uint64   `db:"batch_id"           json:"batchId,omitempty"`

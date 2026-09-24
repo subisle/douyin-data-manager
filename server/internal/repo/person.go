@@ -220,6 +220,18 @@ func (r *Repo) BindAccount(ctx context.Context, a *domain.Account) error {
 		return fmt.Errorf("读取新账号 ID: %w", err)
 	}
 	a.ID = uint64(id)
+
+	// 新绑的号可能带着之前导入的"无主"快照（当时主播还没建档）：
+	// 回填归属并重算，历史数据立刻出现在榜上，不用重新导一遍。
+	from, to, changed, err := r.backfillOrphanSnapshots(ctx, a.AnchorID, a.PersonID)
+	if err != nil {
+		return err
+	}
+	if changed {
+		if err := r.RecomputePerson(ctx, a.PersonID, from, to); err != nil {
+			return fmt.Errorf("重算回填后的历史指标: %w", err)
+		}
+	}
 	return nil
 }
 

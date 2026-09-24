@@ -16,7 +16,7 @@ const STATUS_TEXT: Record<string, string> = {
   new: "新增",
   changed: "覆盖",
   unchanged: "无变化",
-  unmatched: "未入列表",
+  unmatched: "未建档·已存档",
   duplicate: "重复行",
   skipped: "跳过",
 };
@@ -24,7 +24,7 @@ const STATUS_TEXT: Record<string, string> = {
 const STATUS_CLASS: Record<string, string> = {
   new: "badge badge-ok",
   changed: "badge badge-warn",
-  unmatched: "badge badge-err",
+  unmatched: "badge badge-info",
   duplicate: "badge badge-warn",
   skipped: "badge badge-muted",
   unchanged: "badge badge-muted",
@@ -305,7 +305,7 @@ export function ImportPage({ params }: { params?: NavParams }) {
             <span className="badge badge-ok">新增 {p.newCount}</span>
             <span className="badge badge-warn">覆盖 {p.changedCount}</span>
             <span className="badge badge-muted">无变化 {p.unchangedCount}</span>
-            <span className="badge badge-err">未入列表 {p.unmatchedCount}</span>
+            <span className="badge badge-info">未建档 {p.unmatchedCount}</span>
             {p.duplicateCount > 0 && (
               <span className="badge badge-warn">重复行 {p.duplicateCount}</span>
             )}
@@ -318,7 +318,7 @@ export function ImportPage({ params }: { params?: NavParams }) {
                 ["all", "全部"],
                 ["new", "新增"],
                 ["changed", "覆盖"],
-                ["unmatched", "未入列表"],
+                ["unmatched", "未建档"],
                 ["unchanged", "无变化"],
               ].map(([k, label]) => (
                 <button key={k} className={filter === k ? "on" : ""} onClick={() => setFilter(k)}>
@@ -391,7 +391,7 @@ export function ImportPage({ params }: { params?: NavParams }) {
             <span className="spacer" />
             {p.unmatchedCount > 0 && (
               <span className="tiny muted">
-                有 {p.unmatchedCount} 行没匹配到主播：数据仍会存，但不进日榜，请先去主播管理绑号。
+                有 {p.unmatchedCount} 行没匹配到主播：会照常存档但暂不进榜；之后在主播管理加上这些人，历史数据自动显示。
               </span>
             )}
           </div>
