@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -204,10 +205,15 @@ func (t *Transport) handleMessage(ctx context.Context, msg InboundMessage) {
 	}
 
 	text := msg.Text()
-	if text == "" {
+	atts := t.collectAttachments(msg)
+	if text == "" && len(atts) == 0 {
 		return
 	}
-	t.countReceived(text)
+	if text != "" {
+		t.countReceived(text)
+	} else {
+		t.countReceived("[文件] " + atts[0].FileName)
+	}
 
 	out, err := t.handler.Handle(ctx, bot.Inbound{
 		Channel:        t.Name(),
@@ -215,6 +221,7 @@ func (t *Transport) handleMessage(ctx context.Context, msg InboundMessage) {
 		SenderID:       fromUserID,
 		Text:           text,
 		AtMe:           true,
+		Attachments:    atts,
 		ReceivedAt:     time.Now(),
 	})
 	if err != nil {
@@ -227,8 +234,37 @@ func (t *Transport) handleMessage(ctx context.Context, msg InboundMessage) {
 	}
 }
 
-// Send 实现 bot.Transport。文字直发；图片先走 getuploadurl + CDN 上传
-// （与 615 的 weixin-bot-media.js 同款流程），再以 type=2 的 item 发出。
+// collectAttachments 收集入站消息里的文件（item type=4）。
+//
+// 微信不能像 QQ 那样给一个裸下载链接：文件在 CDN 上且是 AES 密文，
+// 所以这里只能交出一个延迟执行的 Fetch 闭包，由导入流程按需下载解密。
+// 语音/视频/图片这些帮不上忙的类型直接忽略——收进来也只是占内存。
+func (t *Transport) collectAttachments(msg InboundMessage) []bot.Attachment {
+	var out []bot.Attachment
+	for _, it := range msg.ItemList {
+		if it.Type != 4 || it.FileItem == nil {
+			continue
+		}
+		ref := it.FileItem.Media
+		if strings.TrimSpace(ref.EncryptQueryParam) == "" {
+			continue
+		}
+		name := strings.TrimSpace(it.FileItem.FileName)
+		if name == "" {
+			name = "weixin-file.csv"
+		}
+		out = append(out, bot.Attachment{
+			FileName: name,
+			Fetch: func(ctx context.Context) ([]byte, error) {
+				return t.client.DownloadInboundMedia(ctx, ref)
+			},
+		})
+	}
+	return out
+}
+
+// Send 实现 bot.Transport。文字直发；图片与文件先走 getuploadurl + CDN 上传
+// （与 615 的 weixin-bot-media.js 同款流程），再以 item 发出。
 func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 	t.mu.RLock()
 	sc, ok := t.sessions[out.ConversationID]
@@ -243,7 +279,7 @@ func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 		images = append(images, bot.OutboundImage{Data: out.Image, Name: out.ImageName})
 	}
 
-	if len(images) == 0 {
+	if len(images) == 0 && len(out.Files) == 0 {
 		if out.Text == "" {
 			return nil
 		}
@@ -251,7 +287,7 @@ func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 			return err
 		}
 	} else {
-		// 先发文字说明，再逐张上传发送图片
+		// 先发文字说明，再逐个上传发送图片与文件
 		if out.Text != "" {
 			if err := t.client.SendText(ctx, sc.toUserID, sc.groupId, sc.contextToken, out.Text); err != nil {
 				return err
@@ -263,6 +299,19 @@ func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 				name = fmt.Sprintf("image-%d.png", i+1)
 			}
 			item, err := t.client.uploadImage(ctx, img.Data, sc.toUserID, name)
+			if err != nil {
+				return fmt.Errorf("上传 %s 失败: %w", name, err)
+			}
+			if err := t.client.SendItems(ctx, sc.toUserID, sc.groupId, sc.contextToken, []outItem{item}); err != nil {
+				return fmt.Errorf("发送 %s 失败: %w", name, err)
+			}
+		}
+		for i, f := range out.Files {
+			name := f.Name
+			if name == "" {
+				name = fmt.Sprintf("data-%d.csv", i+1)
+			}
+			item, err := t.client.uploadFile(ctx, f.Data, sc.toUserID, name)
 			if err != nil {
 				return fmt.Errorf("上传 %s 失败: %w", name, err)
 			}

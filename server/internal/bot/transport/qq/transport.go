@@ -378,7 +378,7 @@ func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 		images = append(images, bot.OutboundImage{Data: out.Image, Name: out.ImageName})
 	}
 
-	if len(images) == 0 {
+	if len(images) == 0 && len(out.Files) == 0 {
 		if out.Text == "" {
 			return nil
 		}
@@ -388,7 +388,7 @@ func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 		return t.client.SendToUser(ctx, sc.userOpenID, out.Text, msgID, 0)
 	}
 
-	// 先发文字说明，再逐张上传发图；单张失败不影响其余
+	// 先发文字说明，再逐个上传媒体；单个失败不影响其余
 	if out.Text != "" {
 		var err error
 		if sc.groupOpenID != "" {
@@ -409,7 +409,33 @@ func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {
 			}
 		}
 	}
+	// QQ 群里对非图片文件的支持是"看官方心情"的：失败不致命，
+	// 但要告诉用户去网页端拿，不能默默吞掉。
+	for i, f := range out.Files {
+		if err := t.sendFile(ctx, sc, f.Data, msgID); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("文件「%s」发送失败（%v），请到网页端「导出图片」领取", f.Name, err)
+			}
+			_ = i
+		}
+	}
 	return firstErr
+}
+
+// sendFile 上传并发送一个非图片文件，按会话类型走群/私聊。
+func (t *Transport) sendFile(ctx context.Context, sc sessionCtx, data []byte, msgID string) error {
+	if sc.groupOpenID != "" {
+		fi, err := t.client.UploadGroupFile(ctx, sc.groupOpenID, data)
+		if err != nil {
+			return err
+		}
+		return t.client.SendGroupMedia(ctx, sc.groupOpenID, fi, msgID, 0)
+	}
+	fi, err := t.client.UploadC2cFile(ctx, sc.userOpenID, data)
+	if err != nil {
+		return err
+	}
+	return t.client.SendUserMedia(ctx, sc.userOpenID, fi, msgID, 0)
 }
 
 // sendImage 上传并发送一张图片，按会话类型走群/私聊。

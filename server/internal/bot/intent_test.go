@@ -19,8 +19,10 @@ func TestParseIntent(t *testing.T) {
 		{"帮助", IntentHelp, "", "", 0, ""},
 		{"help", IntentHelp, "", "", 0, ""},
 
-		{"每日报告", IntentDailyReport, "2026-09-20", "", 0, ""},
-		{"日报", IntentDailyReport, "2026-09-20", "", 0, ""},
+		// 日报默认 T-1：数据是次日才出的，20 号发的日报是 19 号的榜
+		{"每日报告", IntentDailyReport, "2026-09-19", "", 0, ""},
+		{"日报", IntentDailyReport, "2026-09-19", "", 0, ""},
+		{"今天", IntentDailyReport, "2026-09-20", "", 0, ""},
 		{"昨天", IntentDailyReport, "2026-09-19", "", 0, ""},
 		{"18号报告", IntentDailyReport, "2026-09-18", "", 0, ""},
 
@@ -35,7 +37,7 @@ func TestParseIntent(t *testing.T) {
 		{"2026年", IntentYearlyReport, "", "", 2026, ""},
 		{"年报", IntentYearlyReport, "", "", 2026, ""},
 
-		{"每日之星", IntentDailyStar, "2026-09-20", "", 0, ""},
+		{"每日之星", IntentDailyStar, "2026-09-19", "", 0, ""},
 
 		{"柚子", IntentPersonQuery, "", "", 0, "柚子"},
 		{"柚子 9月", IntentPersonQuery, "2026-09-01", "2026-09", 2026, "柚子"},

@@ -27,6 +27,7 @@ const (
 	IntentImportDate    IntentKind = "import_date"
 	IntentAddAnchor     IntentKind = "add_anchor"
 	IntentImportLogs    IntentKind = "import_logs"
+	IntentQuit          IntentKind = "quit"
 	IntentUnknown       IntentKind = "unknown"
 )
 
@@ -102,6 +103,13 @@ func ParseIntent(raw string, now time.Time) Intent {
 		return intent
 	}
 
+	// 退出口令单独认：Manager.Handle 里比这里更早处理，留在这儿是为了
+	// /bots/parse 这种只解析不走技能的调用也能得到正确答案。
+	if IsQuitCommand(text) {
+		intent.Kind = IntentQuit
+		return intent
+	}
+
 	// 帮助
 	for _, kw := range []string{"帮助", "help", "菜单", "指令"} {
 		if lower == kw || strings.Contains(lower, kw+"指令") {
@@ -135,11 +143,13 @@ func ParseIntent(raw string, now time.Time) Intent {
 		return intent
 	}
 
-	// 每日之星
+	// 每日之星（同样按 T+1：没说哪天就是昨天）
 	if strings.Contains(text, "每日之星") || strings.Contains(text, "之星") {
 		intent.Kind = IntentDailyStar
 		spec := dateparse.ParseDateSpec(text)
-		if d, err := dateparse.ResolveDate(spec, now); err == nil {
+		if spec == nil {
+			intent.Date = now.AddDate(0, 0, -1).Format("2006-01-02")
+		} else if d, err := dateparse.ResolveDate(spec, now); err == nil {
 			intent.Date = d.Format("2006-01-02")
 		}
 		return intent
@@ -211,7 +221,11 @@ func ParseIntent(raw string, now time.Time) Intent {
 		intent.Year = dateparse.ResolveYear(spec, now)
 	default:
 		intent.Kind = IntentDailyReport
-		if d, err := dateparse.ResolveDate(spec, now); err == nil {
+		// 没说哪天 → 昨天。数据是 T+1 出的：24 号发的日报就是 23 号的榜，
+		// 用今天去查只会出一张空图。明确说了「今天」的仍然按今天走。
+		if spec == nil {
+			intent.Date = now.AddDate(0, 0, -1).Format("2006-01-02")
+		} else if d, err := dateparse.ResolveDate(spec, now); err == nil {
 			intent.Date = d.Format("2006-01-02")
 		}
 	}

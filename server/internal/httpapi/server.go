@@ -75,6 +75,7 @@ func New(r *repo.Repo, b *bot.Manager, cfg config.Config, log *slog.Logger) *Ser
 	s.mux.HandleFunc("POST /api/v1/bots/push", s.botSetPush)
 	s.mux.HandleFunc("GET /api/v1/bots/messages", s.botMessages)
 	s.mux.HandleFunc("POST /api/v1/bots/parse", s.botParse)
+	s.mux.HandleFunc("POST /api/v1/bots/inject", s.botInject)
 	s.mux.HandleFunc("GET /api/v1/bots/{name}/detail", s.botDetail)
 	s.mux.HandleFunc("POST /api/v1/bots/weixin/qrcode", s.weixinQRCode)
 	s.mux.HandleFunc("GET /api/v1/bots/weixin/qrcode/status", s.weixinLoginStatus)

@@ -35,6 +35,9 @@ const (
 	MsgTypeMedia = 7
 	// FileTypeImage 上传文件时的图片类型
 	FileTypeImage = 1
+	// FileTypeFile 上传文件时……其实官方叫 file_type=4「文件」（615 的 qq-bot.js 同款）。
+	// 注意：群文件对任意格式支持有限，失败的话要退成文字提示，别让用户干等。
+	FileTypeFile = 4
 )
 
 // Client 是 QQ 开放平台的 HTTP 客户端。
@@ -301,6 +304,23 @@ func (c *Client) UploadC2cImage(ctx context.Context, openID string, data []byte)
 		return "", fmt.Errorf("缺少 user openid")
 	}
 	return c.uploadFile(ctx, "/v2/users/"+url.PathEscape(openID)+"/files", FileTypeImage, data)
+}
+
+// UploadGroupFile 群文件上传（非图片），返回 file_info。
+// 官方对任意格式的文件支持有限，失败要由调用方退成文字提示。
+func (c *Client) UploadGroupFile(ctx context.Context, groupOpenID string, data []byte) (string, error) {
+	if groupOpenID == "" {
+		return "", fmt.Errorf("缺少 group_openid")
+	}
+	return c.uploadFile(ctx, "/v2/groups/"+url.PathEscape(groupOpenID)+"/files", FileTypeFile, data)
+}
+
+// UploadC2cFile 私聊文件上传（非图片），返回 file_info。
+func (c *Client) UploadC2cFile(ctx context.Context, openID string, data []byte) (string, error) {
+	if openID == "" {
+		return "", fmt.Errorf("缺少 user openid")
+	}
+	return c.uploadFile(ctx, "/v2/users/"+url.PathEscape(openID)+"/files", FileTypeFile, data)
 }
 
 // SendGroupMedia 发群富媒体消息（msg_type=7）。

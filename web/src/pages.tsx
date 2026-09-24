@@ -35,6 +35,15 @@ const todayLocal = () => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
+// 数据是 T+1 入的：24 号能看到的最新一天是 23 号。
+// 日榜/首页默认落在昨天，避免一进来就是一张空表。
+const dataDayLocal = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
 const fmtDate = (d: Date) => {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
@@ -388,7 +397,7 @@ function BindAccount({ persons, onDone }: { persons: Person[]; onDone: () => voi
 /* -------------------------------- 日榜 -------------------------------- */
 
 export function DailyPage({ params }: { params?: NavParams }) {
-  const [date, setDate] = useState(() => localStorage.getItem("ui.daily.date") ?? todayLocal());
+  const [date, setDate] = useState(() => localStorage.getItem("ui.daily.date") ?? dataDayLocal());
   const [gender, setGender] = useState(rememberedGender);
   const { navigate } = useNav();
   const { data, error, loading } = useLoad(() => api.daily(date, gender || undefined), [date, gender]);

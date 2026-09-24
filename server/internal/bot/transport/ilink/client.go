@@ -266,16 +266,36 @@ func (c *Client) GetQRCodeStatus(ctx context.Context, qrcode string) (*QRCodeSta
 
 /* -------------------------------- 收消息 -------------------------------- */
 
-// Item 消息内容项。type 1 是文本。
+// Item 消息内容项。type 编号与 615 的 extractMessagePreview 一致：
+// 1 文本 / 2 图片 / 3 语音 / 4 文件 / 5 视频。
 type Item struct {
-	Type     int             `json:"type"`
-	TextItem *TextItem       `json:"text_item,omitempty"`
-	Raw      json.RawMessage `json:"-"`
+	Type     int        `json:"type"`
+	TextItem *TextItem  `json:"text_item,omitempty"`
+	FileItem *FileItem  `json:"file_item,omitempty"`
+	ImageItem *ImageItem `json:"image_item,omitempty"`
 }
 
 // TextItem 文本内容。
 type TextItem struct {
 	Text string `json:"text"`
+}
+
+// FileItem type=4：群/私聊里发过来的文件（CSV 导入就靠它）。
+type FileItem struct {
+	Media    MediaRef `json:"media"`
+	FileName string   `json:"file_name"`
+}
+
+// ImageItem type=2：图片。
+type ImageItem struct {
+	Media MediaRef `json:"media"`
+}
+
+// MediaRef 媒体引用。入站媒体是密文，必须拿 CDN 的参数下载后再解 AES。
+type MediaRef struct {
+	EncryptQueryParam string `json:"encrypt_query_param"`
+	AesKey            string `json:"aes_key"`
+	EncryptType       int    `json:"encrypt_type"`
 }
 
 // InboundMessage 一条入站消息。
@@ -355,12 +375,22 @@ type outImageItem struct {
 	HdSize  int      `json:"hd_size"`
 }
 
+// outFileItem type=4：主动给会话发文件（导出结果回传等）。
+// md5/len 与 615 的 buildMediaItem 逐字段对齐。
+type outFileItem struct {
+	Media    outMedia `json:"media"`
+	FileName string   `json:"file_name"`
+	Md5      string   `json:"md5"`
+	Len      string   `json:"len"`
+}
+
 type outItem struct {
 	Type      int           `json:"type"`
 	TextItem  struct {
 		Text string `json:"text"`
 	} `json:"text_item,omitempty"`
 	ImageItem *outImageItem `json:"image_item,omitempty"`
+	FileItem  *outFileItem  `json:"file_item,omitempty"`
 }
 
 type outboundMsg struct {

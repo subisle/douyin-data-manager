@@ -8,39 +8,57 @@ import { DailyPage, MonthlyPage, PersonsPage, YearlyPage } from "./pages";
 import { buildHash, parseHash, NavContext, type NavParams } from "./nav";
 
 /*
- * 导航按语义分四组，组间加分隔线；页面用 keep-alive 挂载
- * （首次访问才挂、之后隐藏不卸），切 tab 不丢已选的日期/性别/勾选。
- * 当前 tab 与跳转参数都在 location.hash 里，刷新和分享都不丢。
+ * 桌面走左侧分组导航，窄屏走底部 tab——同一份 NAV_GROUPS 渲染两遍。
+ * 页面 keep-alive 挂载：首次访问才挂、之后隐藏不卸，切 tab 不丢已选的
+ * 日期/性别/勾选。当前 tab 与跳转参数都在 location.hash 里，刷新和分享都不丢。
  */
 const NAV_GROUPS: {
-  tabs: { key: string; label: string; Comp: ComponentType<{ params?: NavParams }> }[];
+  label?: string;
+  tabs: { key: string; label: string; icon: string; Comp: ComponentType<{ params?: NavParams }> }[];
 }[] = [
   {
-    tabs: [{ key: "home", label: "首页", Comp: DashboardPage }],
+    tabs: [{ key: "home", label: "首页", icon: "◎", Comp: DashboardPage }],
   },
   {
+    label: "榜单",
     tabs: [
-      { key: "daily", label: "日榜", Comp: DailyPage },
-      { key: "monthly", label: "月榜", Comp: MonthlyPage },
-      { key: "yearly", label: "年度汇总", Comp: YearlyPage },
+      { key: "daily", label: "日榜", icon: "☀", Comp: DailyPage },
+      { key: "monthly", label: "月榜", icon: "▤", Comp: MonthlyPage },
+      { key: "yearly", label: "年度汇总", icon: "✦", Comp: YearlyPage },
     ],
   },
   {
-    tabs: [{ key: "persons", label: "主播管理", Comp: PersonsPage }],
+    label: "名单",
+    tabs: [{ key: "persons", label: "主播管理", icon: "☺", Comp: PersonsPage }],
   },
   {
+    label: "数据",
     tabs: [
-      { key: "import", label: "数据导入", Comp: ImportPage },
-      { key: "export", label: "导出图片", Comp: ExportPage },
-      { key: "cleanup", label: "数据清理", Comp: DataCleanupPage },
+      { key: "import", label: "数据导入", icon: "⇩", Comp: ImportPage },
+      { key: "export", label: "导出图片", icon: "⇧", Comp: ExportPage },
+      { key: "cleanup", label: "数据清理", icon: "⌫", Comp: DataCleanupPage },
     ],
   },
   {
-    tabs: [{ key: "bots", label: "机器人", Comp: BotPage }],
+    label: "自动化",
+    tabs: [{ key: "bots", label: "机器人", icon: "⚙", Comp: BotPage }],
   },
 ];
 
 const ALL_TABS = NAV_GROUPS.flatMap((g) => g.tabs);
+
+// 每页一句话说明：告诉新用户这页能干嘛，别让人猜
+const PAGE_DESC: Record<string, string> = {
+  home: "音浪走势、当日概览与预警，一屏看完今天发生了什么。",
+  daily: "按天查看音浪与时长榜单，可切换性别、回看任意历史日期。",
+  monthly: "整月累计；月榜的「累计音浪」取当月 1 号到数据日的日音浪总和。",
+  yearly: "全年汇总：每个人的年度音浪、开播天数与最佳月份。",
+  persons: "主播名单、绑抖音号、设师傅与世代，也支持 CSV 批量建档。",
+  import: "导 CSV 入库。默认进昨天；指定任意一天请先选日期再传文件。",
+  export: "生成与群内日报同款样式的图片，用于对外汇报。",
+  cleanup: "按日期或区间删除音浪/时长数据，删完自动重算受影响的主播。",
+  bots: "微信与 QQ 双通道机器人：扫码登录、收发文件、命令与调测。",
+};
 
 export default function App() {
   const [route, setRoute] = useState(parseHash);
@@ -73,40 +91,79 @@ export default function App() {
     [route],
   );
 
+  const current = ALL_TABS.find((t) => t.key === route.tab);
+
   return (
     <NavContext.Provider value={nav}>
-      <header className="topbar">
-        <span className="brand">主播数据管理</span>
-        <nav className="tabs" aria-label="主导航">
+      <div className="app-shell">
+        <aside className="sidebar">
+          <div className="brand">
+            <span className="brand-mark">抖</span>
+            <span>
+              主播数据管理
+              <span className="brand-sub">抖音数据管理台</span>
+            </span>
+          </div>
+
           {NAV_GROUPS.map((group, gi) => (
-            <div className="nav-group" key={gi}>
-              {gi > 0 && (
-                <span className="nav-divider" aria-hidden="true" />
-              )}
+            <div key={gi}>
+              {group.label && <div className="nav-group-label">{group.label}</div>}
               {group.tabs.map((t) => (
                 <button
                   key={t.key}
-                  className={route.tab === t.key ? "tab active" : "tab"}
+                  className={route.tab === t.key ? "nav-item active" : "nav-item"}
                   onClick={() => nav.navigate(t.key)}
                 >
+                  <span className="nav-icon" aria-hidden="true">
+                    {t.icon}
+                  </span>
                   {t.label}
                 </button>
               ))}
             </div>
           ))}
-        </nav>
-      </header>
 
-      <main className="layout">
-        {/* keep-alive：访问过的页面保持挂载（隐藏不卸载），状态不丢。
-            必须始终用同一层 div 包裹（hidden 切换），否则 React 按
-            元素类型 diff 会卸载重建，keep-alive 失效。 */}
-        {ALL_TABS.filter((t) => visited.has(t.key)).map((t) => (
-          <div key={t.key} hidden={t.key !== route.tab}>
-            <t.Comp params={t.key === route.tab ? route.params : undefined} />
+          <div className="sidebar-foot">
+            音浪与时长按天 T+1 入库，
+            <br />
+            今天看到的通常是昨天的数据。
           </div>
+        </aside>
+
+        <main className="content">
+          <div className="page-head">
+            <div>
+              <h1 className="page-title">{current?.label ?? "首页"}</h1>
+              <p className="page-desc">{PAGE_DESC[route.tab] ?? ""}</p>
+            </div>
+          </div>
+
+          {/* keep-alive：访问过的页面保持挂载（隐藏不卸载），状态不丢。
+              必须始终用同一层 div 包裹（hidden 切换），否则 React 按
+              元素类型 diff 会卸载重建，keep-alive 失效。 */}
+          {ALL_TABS.filter((t) => visited.has(t.key)).map((t) => (
+            <div key={t.key} hidden={t.key !== route.tab}>
+              <t.Comp params={t.key === route.tab ? route.params : undefined} />
+            </div>
+          ))}
+        </main>
+      </div>
+
+      {/* 移动端底部 tab：全部入口可横滑 */}
+      <nav className="tabbar" aria-label="主导航">
+        {ALL_TABS.map((t) => (
+          <button
+            key={t.key}
+            className={route.tab === t.key ? "tabbar-item active" : "tabbar-item"}
+            onClick={() => nav.navigate(t.key)}
+          >
+            <span className="tab-ico" aria-hidden="true">
+              {t.icon}
+            </span>
+            {t.label}
+          </button>
         ))}
-      </main>
+      </nav>
     </NavContext.Provider>
   );
 }

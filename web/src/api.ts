@@ -205,6 +205,52 @@ const qs = (params: Record<string, string | undefined>) => {
   return s ? `?${s}` : "";
 };
 
+// ---------------- 机器人 ----------------
+
+export interface BotChannelStatus {
+  name: string;
+  running: boolean;
+  connected: boolean;
+  note?: string;
+}
+
+export interface BotLog {
+  at: string;
+  channel: string;
+  dir: "in" | "out";
+  from: string;
+  text: string;
+  intent?: string;
+  hasImage?: boolean;
+}
+
+export interface WeixinQR {
+  qrcode: string;
+  url: string;
+  expiresAt?: string;
+}
+
+export interface LoginStatus {
+  phase: string;
+  scanned: boolean;
+  loggedIn: boolean;
+  nickname?: string;
+  note?: string;
+}
+
+export interface InjectMedia {
+  name: string;
+  size: number;
+  dataUrl?: string;
+}
+
+export interface InjectResult {
+  text: string;
+  conversation: string;
+  images: InjectMedia[];
+  files: InjectMedia[];
+}
+
 export interface ImportLogRow {
   id: number;
   kind: string;
@@ -332,6 +378,48 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ primaryPersonId, secondaryPersonId, mergeDuration }),
     }),
+
+  // ---------------- 机器人 ----------------
+
+  botStatus: () =>
+    request<{ channels: BotChannelStatus[]; push: boolean }>("/bots/status"),
+
+  botStart: (name: string) => request<null>(`/bots/${name}/start`, { method: "POST" }),
+
+  botStop: (name: string) => request<null>(`/bots/${name}/stop`, { method: "POST" }),
+
+  botSetPush: (enabled: boolean) =>
+    request<{ push: boolean }>("/bots/push", {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    }),
+
+  botMessages: (limit = 50) => request<BotLog[]>(`/bots/messages?limit=${limit}`),
+
+  botParse: (text: string) =>
+    request<{ input: string; intent: { Kind: string; Date?: string; Period?: string; Query?: string } }>(
+      "/bots/parse",
+      { method: "POST", body: JSON.stringify({ text }) },
+    ),
+
+  botWeixinQRCode: () => request<WeixinQR>("/bots/weixin/qrcode", { method: "POST" }),
+
+  botWeixinLoginStatus: () => request<LoginStatus>("/bots/weixin/qrcode/status"),
+
+  botQqCredentials: (appId: string, clientSecret: string) =>
+    request<{ mounted: boolean }>("/bots/qq/credentials", {
+      method: "POST",
+      body: JSON.stringify({ appId, clientSecret }),
+    }),
+
+  /** 网页端假装自己在群里说话：走与微信/QQ 完全相同的 Handle 流程 */
+  injectToBot: (payload: { text: string; conversation?: string; file?: File | null }) => {
+    const fd = new FormData();
+    fd.append("text", payload.text ?? "");
+    if (payload.conversation) fd.append("conversation", payload.conversation);
+    if (payload.file) fd.append("file", payload.file);
+    return upload<InjectResult>("/bots/inject", fd);
+  },
 
   setMaster: (personId: number, masterId: number | null) =>
     request<unknown>(`/persons/${personId}/master`, {

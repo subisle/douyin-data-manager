@@ -82,13 +82,13 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 	out := Outbound{ConversationID: in.ConversationID}
 
 	att := in.Attachments[0] // 一次处理一个，多发的让用户重传
-	data, err := downloadAttachment(ctx, att.URL)
+	data, err := fetchAttachment(ctx, att)
 	if err != nil {
 		out.Text = "附件下载失败：" + err.Error()
 		return out, nil
 	}
 	if !strings.HasSuffix(strings.ToLower(att.FileName), ".csv") {
-		out.Text = "请发送 CSV 格式的音浪或时长文件。\n默认导入到昨天；若要指定日期，请先发「24号数据」再传文件。"
+		out.Text = "请发送 CSV 格式的音浪或时长文件。\n默认导入到昨天；若要指定日期，请先发「24号数据」再传文件。\n（发了日期又不想导了：回一个「q」即可退出。）"
 		return out, nil
 	}
 
@@ -222,11 +222,18 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 	var sourceHint string
 	switch source {
 	case "yesterday":
-		sourceHint = "（默认昨天；指定日期请先发「X号数据」）"
+		sourceHint = "（默认昨天；要指定日期请先发「X号数据」）"
 	case "pending":
-		sourceHint = "（按你预告的日期）"
+		sourceHint = "（按你预告的日期；不想导了发 q）"
 	default:
 		sourceHint = "（按消息指定日期）"
+	}
+	// 目标是未来的某天：平台数据通常次日才出，提醒一句但不改日期——
+	// 运营明说了 9.1 就写 9.1，擅自纠正只会造成「我明明说了 9.1」的困惑。
+	todayMidnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	if date.After(todayMidnight) {
+		sourceHint += fmt.Sprintf("\n提醒：%s 还没到，音浪一般是次日才能导出；真导错了发「q」，重传一次覆盖即可。",
+			friendlyDate(date.Format("2006-01-02")))
 	}
 	lines := []string{
 		fmt.Sprintf("已导入 %s 的%s数据%s：%d 条；未匹配 %d 条，重复行 %d 条，非法行 %d 条。",
@@ -273,7 +280,21 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 	return out, nil
 }
 
-// downloadAttachment 下载附件直链。QQ 事件里的 URL 自带 rkey 鉴权参数，
+// fetchAttachment 取附件内容。优先用通道给的 Fetch 闭包（微信 iLink 的
+// 文件必须先走 CDN 下载 + AES 解密），没有闭包才按 URL 直连下载。
+func fetchAttachment(ctx context.Context, att Attachment) ([]byte, error) {
+	if att.Fetch != nil {
+		data, err := att.Fetch(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if len(data) > maxDownloadBytes {
+			return nil, errors.New("附件超过大小上限（20MB）")
+		}
+		return data, nil
+	}
+	return downloadAttachment(ctx, att.URL)
+}
 // 协议相对地址（//…）补 https。强制大小上限，防止把内存吃爆。
 func downloadAttachment(ctx context.Context, rawURL string) ([]byte, error) {
 	url := strings.TrimSpace(rawURL)

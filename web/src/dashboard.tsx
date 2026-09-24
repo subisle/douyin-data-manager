@@ -194,7 +194,7 @@ export function DashboardPage() {
   return (
     <div className="panel">
       <div className="toolbar" style={{ justifyContent: "space-between" }}>
-        <h3 style={{ margin: 0 }}>今日概览</h3>
+        <h3 style={{ margin: 0 }}>数据概览</h3>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span className="muted">{s?.date ?? ""}</span>
           <select value={days} onChange={(e) => setDays(e.target.value)}>

@@ -2,8 +2,11 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -197,6 +200,125 @@ func (s *Server) qqCredentials(w http.ResponseWriter, r *http.Request) {
 	_ = m.Stop("qq")
 	m.Register(qq.New(m, req.AppID, req.ClientSecret, req.APIBase))
 	writeJSON(w, http.StatusOK, map[string]any{"mounted": true})
+}
+
+// botInject POST /api/v1/bots/inject —— 网页端假装自己在群里说话。
+//
+// multipart: text（可空）+ file（可多个）。走的是和微信/QQ 完全相同的
+// Manager.Handle，所以日期口令、q 退出、改名流程在网页上端 adm行为一致。
+// 存在的意义：不用真连一个 IM 账号也能验收整套导入链路。
+func (s *Server) botInject(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.botManager()
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "BOTS_DISABLED", "机器人未启用")
+		return
+	}
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		badRequest(w, "表单解析失败："+err.Error())
+		return
+	}
+
+	text := strings.TrimSpace(r.FormValue("text"))
+	conv := strings.TrimSpace(r.FormValue("conversation"))
+	if conv == "" {
+		conv = "web-console"
+	}
+
+	// 入站附件。内容与文件名一起给 Manager，导入流程只认 .csv。
+	atts := make([]bot.Attachment, 0, 2)
+	if r.MultipartForm != nil {
+		for _, headers := range r.MultipartForm.File {
+			for _, fh := range headers {
+				if fh.Size > 20<<20 {
+					badRequest(w, "单个文件不能超过 20MB")
+					return
+				}
+				f, err := fh.Open()
+				if err != nil {
+					badRequest(w, "读取上传文件失败")
+					return
+				}
+				data, err := io.ReadAll(f)
+				_ = f.Close()
+				if err != nil {
+					badRequest(w, "读取上传文件失败")
+					return
+				}
+				payload := data // 闭包要抓副本，循环变量会被复用
+				atts = append(atts, bot.Attachment{
+					FileName: fh.Filename,
+					Size:     fh.Size,
+					Fetch: func(ctx context.Context) ([]byte, error) {
+						return payload, nil
+					},
+				})
+			}
+		}
+	}
+
+	if text == "" && len(atts) == 0 {
+		badRequest(w, "至少要有文字或一个文件")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+
+	// 一次只喂一个附件：与 IM 通道一致（多文件得在群里一次次发），
+	// 这样日期口令「还剩几个文件」的计数语义才和线上一致。
+	if len(atts) > 1 {
+		atts = atts[:1]
+	}
+
+	out, err := m.Handle(ctx, bot.Inbound{
+		Channel:        "web",
+		ConversationID: conv,
+		SenderID:       "web",
+		Text:           text,
+		AtMe:           true,
+		Attachments:    atts,
+		ReceivedAt:     time.Now(),
+	})
+	if err != nil {
+		internalError(w, err)
+		return
+	}
+
+	type mediaOut struct {
+		Name    string `json:"name"`
+		Size    int    `json:"size"`
+		DataURL string `json:"dataUrl,omitempty"`
+	}
+	images := make([]mediaOut, 0, 2)
+	collect := func(name string, data []byte) {
+		if len(data) == 0 {
+			return
+		}
+		mo := mediaOut{Name: name, Size: len(data)}
+		if strings.EqualFold(filepath.Ext(name), ".svg") {
+			// SVG 是文本，前端直接塞进 <img> 就行，省一轮 base64
+			mo.DataURL = "data:image/svg+xml;utf8," + string(data)
+		} else {
+			mo.DataURL = "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
+		}
+		images = append(images, mo)
+	}
+	collect(out.ImageName, out.Image)
+	for _, img := range out.Images {
+		collect(img.Name, img.Data)
+	}
+
+	files := make([]mediaOut, 0, len(out.Files))
+	for _, f := range out.Files {
+		files = append(files, mediaOut{Name: f.Name, Size: len(f.Data)})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"text":         out.Text,
+		"conversation": conv,
+		"images":       images,
+		"files":        files,
+	})
 }
 
 // botParse POST /api/v1/bots/parse  {"text":"柚子 9月"}

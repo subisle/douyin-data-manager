@@ -71,7 +71,9 @@ func (s *Server) monthlyMetrics(w http.ResponseWriter, r *http.Request) {
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	raw := r.URL.Query().Get("date")
 	if raw == "" {
-		raw = time.Now().Format(isoDate)
+		// 不传日期 → 昨天。数据是 T+1 入的，今天还没有数据，
+		// 默认今天会让首页一进来就是空的（机器人日报同理）。
+		raw = time.Now().AddDate(0, 0, -1).Format(isoDate)
 	}
 	date, err := time.ParseInLocation(isoDate, raw, time.Local)
 	if err != nil {

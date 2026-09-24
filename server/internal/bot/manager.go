@@ -17,6 +17,9 @@ type Attachment struct {
 	URL      string // 下载直链（QQ 事件自带 rkey 鉴权参数，无需额外头）
 	FileName string
 	Size     int64
+	// Fetch 优先于 URL：微信 iLink 的文件要走 CDN 下载 + AES 解密，
+	// 拿不到一个裸 URL，只能给闭包。没有 Fetch 时按 URL 下载。
+	Fetch func(ctx context.Context) ([]byte, error)
 }
 
 // Inbound 收到的消息。两个通道（微信 / QQ）统一成这个结构。
@@ -39,10 +42,19 @@ type Outbound struct {
 	// Images 多图（日报按性别各一张：女团样式1 + 男团样式2）。
 	// 通道按顺序逐张发送；Image 字段保留给单图场景，两者可并存。
 	Images []OutboundImage
+	// Files 要发回去的文件（CSV 导出等）。两个通道都支持：
+	// 微信走 type=4 file_item 上传，QQ 走 /files 的 file_type=4。
+	Files []OutboundFile
 }
 
 // OutboundImage 一张待发送的图片。
 type OutboundImage struct {
+	Data []byte
+	Name string
+}
+
+// OutboundFile 一个待发送的文件（非图片）。
+type OutboundFile struct {
 	Data []byte
 	Name string
 }
@@ -75,6 +87,51 @@ type Manager struct {
 	log        []LoggedMessage
 	pending    map[string]*pendingImport // 导入日期口令，key 是会话 ID
 	pendingOps map[string]*pendingOp     // 改名/改号对话，key 是会话 ID
+}
+
+// IsQuitCommand 是否「退出当前流程」口令。
+//
+// 只认孤立的 q/Q/quit 与「退出」「取消」，必须是整条消息——
+// 群里有主播艺名是单字母的可能，所以要求完全相等才算。
+func IsQuitCommand(text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "q", "quit", "退出", "退出。", "算了", "取消", "cancel", "c":
+		return true
+	}
+	return false
+}
+
+// cancelConversation 清空该会话正在进行的一切：导入日期口令 + 改名/改号待办。
+//
+// 什么都没在进行时也要回一句话——用户发了 q 而机器人安静如鸡，
+// 看起来跟掉线一模一样。
+func (m *Manager) cancelConversation(conv string) string {
+	m.mu.Lock()
+	pending := m.pending[conv]
+	if pending != nil {
+		delete(m.pending, conv)
+	}
+	hasOp := false
+	if m.pendingOps != nil {
+		if _, ok := m.pendingOps[conv]; ok {
+			delete(m.pendingOps, conv)
+			hasOp = true
+		}
+	}
+	m.mu.Unlock()
+
+	switch {
+	case pending != nil && hasOp:
+		return fmt.Sprintf("已退出：取消了「%s」的导入口令，同时放弃了未完成的改名/改号。",
+			friendlyDate(pending.date.Format("2006-01-02")))
+	case pending != nil:
+		return fmt.Sprintf("已退出：取消了「%s」的导入口令。直接发 CSV 就按昨天导入。",
+			friendlyDate(pending.date.Format("2006-01-02")))
+	case hasOp:
+		return "已退出：放弃了未完成的改名/改号。需要的话重新发「改名」或「改号」。"
+	default:
+		return "当前没有进行中的流程。直接发 CSV 导入昨天的数据；想指定日期就先发「9.1」再传文件。"
+	}
 }
 
 // pendingImport 615 同款：先发「9.11」记住日期，10 分钟内连传的 CSV 都进该日。
@@ -270,6 +327,17 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 		return out, nil
 	}
 
+	// q / 退出：放弃本会话当前进行的一切。放在意图解析之前——
+	// 用户在流程里敲 q 就是想跳出来，不该被当成艺名或日期去解析。
+	if IsQuitCommand(in.Text) {
+		out := Outbound{ConversationID: in.ConversationID, Text: m.cancelConversation(in.ConversationID)}
+		m.appendLog(LoggedMessage{At: now, Channel: in.Channel, Dir: "in",
+			From: in.SenderID, Text: in.Text, Intent: string(IntentQuit)})
+		m.appendLog(LoggedMessage{At: time.Now(), Channel: in.Channel, Dir: "out",
+			From: in.ConversationID, Text: out.Text, Intent: string(IntentQuit)})
+		return out, nil
+	}
+
 	intent := ParseIntent(in.Text, now)
 
 	out := Outbound{ConversationID: in.ConversationID}
@@ -334,8 +402,12 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 	case IntentImportDate:
 		m.rememberImportDate(in.ConversationID, intent.Date)
 		out.Text = fmt.Sprintf(
-			"已记住导入日期 %s（10 分钟内有效，可连传 %d 个文件）。请依次发送音浪与时长 CSV。",
+			"已记住导入日期 %s（10 分钟内有效，可连传 %d 个文件）。请依次发送音浪与时长 CSV；不想导了发 q。",
 			friendlyDate(intent.Date), pendingImportMaxFiles)
+		// 指定了今天之后的日子：说明一句，但不替用户改——写哪天由他定。
+		if t := parseOrNow(intent.Date, now); t.After(time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())) {
+			out.Text += fmt.Sprintf("\n提醒：%s 还没到，音浪一般次日才出。", friendlyDate(intent.Date))
+		}
 
 	case IntentAddAnchor:
 		o, aerr := m.handleAddAnchor(ctx, intent.Query, intent.DouyinNo)
@@ -345,7 +417,7 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 		out = o
 
 	case IntentDailyReport:
-		date := parseOrNow(intent.Date, now)
+		date := parseOrYesterday(intent.Date, now)
 		svg, err := m.buildDailyReport(ctx, date, intent.Gender)
 		if err != nil {
 			return out, err
@@ -449,6 +521,15 @@ func sumWave(rows []domain.MonthlyMetric) string {
 	return render.FormatWave(total)
 }
 
+// parseOrYesterday 解析日期，空则昨天。
+// 日报/每日之星默认 T-1：24 号发的是 23 号的数据，用今天查只会出空榜。
+func parseOrYesterday(s string, fallback time.Time) time.Time {
+	if s == "" {
+		return fallback.AddDate(0, 0, -1)
+	}
+	return parseOrNow(s, fallback)
+}
+
 func parseOrNow(s string, fallback time.Time) time.Time {
 	if s == "" {
 		return fallback
@@ -464,9 +545,10 @@ func parseOrNow(s string, fallback time.Time) time.Time {
 func HelpText() string {
 	return strings.Join([]string{
 		"可用指令：",
-		"· 日报 / 每日报告 —— 今日榜单图",
-		"· 昨天 / 18号报告 / 9月11日报 —— 指定某天",
-		"· 9.11 —— 预告导入日，10 分钟内传 CSV 进该日",
+		"· 日报 / 每日报告 —— 昨天榜单图（数据 T+1，24 号发的是 23 号）",
+		"· 今天 / 昨天 / 18号报告 / 9月11日报 —— 指定某天",
+		"· 9.1 / 9月1日 / 1号 —— 预告导入日，随后传的 CSV 全部进该日（指定哪天就是哪天）",
+		"· q —— 退出当前流程：作废导入日期口令、放弃改名/改号",
 		"· 9月 / 2026年3月 —— 月榜",
 		"· 2026年 —— 年度汇总",
 		"· 艺名 —— 查某位主播",
