@@ -91,6 +91,23 @@ func (s *Server) botSetPush(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"push": req.Enabled})
 }
 
+// botRemind POST /api/v1/bots/remind —— 立即向所有活跃会话索要 CSV 文件。
+// 每日 1 点的定时版走 Manager.StartReminderLoop，这里是手动触发同一套逻辑。
+func (s *Server) botRemind(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.botManager()
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "BOTS_DISABLED", "机器人未启用")
+		return
+	}
+	// 群发可能要几十秒（逐会话发），给足超时
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"text":     bot.ReminderText(),
+		"channels": m.RemindAll(ctx, bot.ReminderText()),
+	})
+}
+
 // botMessages GET /api/v1/bots/messages?limit=50
 func (s *Server) botMessages(w http.ResponseWriter, r *http.Request) {
 	m, ok := s.botManager()

@@ -73,6 +73,7 @@ func New(r *repo.Repo, b *bot.Manager, cfg config.Config, log *slog.Logger) *Ser
 	s.mux.HandleFunc("POST /api/v1/bots/{name}/start", s.botStart)
 	s.mux.HandleFunc("POST /api/v1/bots/{name}/stop", s.botStop)
 	s.mux.HandleFunc("POST /api/v1/bots/push", s.botSetPush)
+	s.mux.HandleFunc("POST /api/v1/bots/remind", s.botRemind)
 	s.mux.HandleFunc("GET /api/v1/bots/messages", s.botMessages)
 	s.mux.HandleFunc("POST /api/v1/bots/parse", s.botParse)
 	s.mux.HandleFunc("POST /api/v1/bots/inject", s.botInject)

@@ -394,6 +394,10 @@ export const api = {
       body: JSON.stringify({ enabled }),
     }),
 
+  /** 立即向所有活跃会话索要 CSV 文件（每日 1 点定时版走服务端调度） */
+  botRemindNow: () =>
+    request<{ text: string; channels: string[] }>("/bots/remind", { method: "POST" }),
+
   botMessages: (limit = 50) => request<BotLog[]>(`/bots/messages?limit=${limit}`),
 
   botParse: (text: string) =>

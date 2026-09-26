@@ -88,6 +88,9 @@ func main() {
 		startCancel()
 	}
 
+	// 每天 1 点向活跃会话索要 CSV 文件（机器人页可开关、可手动触发）
+	bots.StartReminderLoop(context.WithoutCancel(ctx))
+
 	srv := httpapi.New(r, bots, cfg, log)
 
 	// 单容器部署时，前端产物交给同一个端口托管，省一层反代。

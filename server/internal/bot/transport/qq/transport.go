@@ -281,6 +281,35 @@ type dispatchData struct {
 	} `json:"author"`
 }
 
+// RemindAll 给所有聊过的群/用户发主动消息（不带 msg_id）。
+// 官方对主动消息有频率限制，失败的按条计，不中断其余会话。
+func (t *Transport) RemindAll(ctx context.Context, text string) (sent, failed int) {
+	t.mu.RLock()
+	convs := make([]sessionCtx, 0, len(t.sessions))
+	for _, sc := range t.sessions {
+		convs = append(convs, sc)
+	}
+	t.mu.RUnlock()
+
+	for _, sc := range convs {
+		var err error
+		if sc.groupOpenID != "" {
+			err = t.client.SendToGroup(ctx, sc.groupOpenID, text, "", 0)
+		} else {
+			err = t.client.SendToUser(ctx, sc.userOpenID, text, "", 0)
+		}
+		if err != nil {
+			failed++
+			continue
+		}
+		sent++
+		t.mu.Lock()
+		t.msgCount++
+		t.mu.Unlock()
+	}
+	return sent, failed
+}
+
 // getDispatcher 取异步派发器。Start 之前收到消息（理论上不该发生）就同步跑，
 // 别让消息凭空消失。
 func (t *Transport) getDispatcher() *bot.Dispatcher {

@@ -330,7 +330,7 @@ export function BotPage() {
                 {onlineCount > 0 ? `${onlineCount} 个通道运行中` : "全部离线"}
               </span>
               <span className="spacer" />
-              <span className="tiny muted">日报推送</span>
+              <span className="tiny muted">每日 1 点索要 CSV</span>
               <button
                 className={push ? "btn-sm ghost" : "btn-sm"}
                 onClick={async () => {
@@ -343,6 +343,32 @@ export function BotPage() {
                 }}
               >
                 {push ? "已开启" : "已关闭"}
+              </button>
+              <button
+                className="btn-sm ghost"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setErr("");
+                  try {
+                    const r = await api.botRemindNow();
+                    setTurns((prev) => [
+                      ...prev,
+                      {
+                        id: ++seq.current,
+                        dir: "out" as const,
+                        text: `📣 已向全部活跃会话发送索要提醒：\n${r.text}\n${r.channels.join("；") || "（没有可发送的会话）"}`,
+                        at: nowLabel(),
+                      },
+                    ]);
+                  } catch (e) {
+                    setErr((e as Error).message);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                立即索要
               </button>
             </div>
 

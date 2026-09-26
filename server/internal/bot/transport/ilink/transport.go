@@ -271,6 +271,30 @@ func (t *Transport) collectAttachments(msg InboundMessage) []bot.Attachment {
 	return out
 }
 
+// RemindAll 给所有有会话上下文的群/用户发同一条文本（每日 1 点索要 CSV 用）。
+// iLink 发消息必须带原消息的 context_token，所以只能覆盖「聊过天的」会话——
+// 没聊过的本来也进不了 sessions。
+func (t *Transport) RemindAll(ctx context.Context, text string) (sent, failed int) {
+	t.mu.RLock()
+	list := make([]sessionCtx, 0, len(t.sessions))
+	for _, sc := range t.sessions {
+		list = append(list, sc)
+	}
+	t.mu.RUnlock()
+
+	for _, sc := range list {
+		if err := t.client.SendText(ctx, sc.toUserID, sc.groupId, sc.contextToken, text); err != nil {
+			failed++
+			continue
+		}
+		sent++
+		t.mu.Lock()
+		t.sent++
+		t.mu.Unlock()
+	}
+	return sent, failed
+}
+
 // Send 实现 bot.Transport。文字直发；图片与文件先走 getuploadurl + CDN 上传
 // （与 615 的 weixin-bot-media.js 同款流程），再以 item 发出。
 func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {

@@ -168,7 +168,7 @@ type LoggedMessage struct {
 
 // NewManager 构造。通道需要调用 Register 挂载真实实现。
 func NewManager(r *repo.Repo) *Manager {
-	return &Manager{
+	m := &Manager{
 		repo: r,
 		channels: map[string]*channelState{
 			"weixin": {note: "微信 iLink 适配器待接入"},
@@ -177,6 +177,15 @@ func NewManager(r *repo.Repo) *Manager {
 		log:     []LoggedMessage{},
 		pending: map[string]*pendingImport{},
 	}
+	// 推送开关持久化在 app_setting：容器天天重启，内存态撑不到凌晨 1 点
+	if r != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if enabled, err := r.GetPushEnabled(ctx); err == nil {
+			m.push = enabled
+		}
+	}
+	return m
 }
 
 // Register 挂载一个通道实现。
@@ -269,11 +278,94 @@ func (m *Manager) PushEnabled() bool {
 	return m.push
 }
 
-// SetPush 切换日报推送。
+// SetPush 切换每日索要提醒，并持久化到 app_setting。
 func (m *Manager) SetPush(enabled bool) {
 	m.mu.Lock()
 	m.push = enabled
 	m.mu.Unlock()
+	if m.repo != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := m.repo.SetPushEnabled(ctx, enabled); err != nil {
+			// 持久化失败只影响重启后的默认值，不回滚内存态
+			m.appendLog(LoggedMessage{At: time.Now(), Channel: "all", Dir: "out",
+				From: "系统", Text: "提醒开关持久化失败：" + err.Error(), Intent: "remind"})
+		}
+	}
+}
+
+// reminderHour 每天几点自动向活跃会话索要 CSV 文件。
+const reminderHour = 1
+
+// ReminderText 定时/手动索要文件时发的文案。
+func ReminderText() string {
+	return "麻烦大家把昨天的音浪与时长 CSV 文件发一下～\n直接传文件即可（默认进昨天；指定日期先发「X号数据」，不导了发 q）。"
+}
+
+// StartReminderLoop 每天 reminderHour 点向所有活跃会话索要 CSV 文件。
+// 只在「提醒开关」开启时发送（机器人页可开关，持久化）；重启后循环重建，不丢调度。
+func (m *Manager) StartReminderLoop(ctx context.Context) {
+	go func() {
+		for {
+			now := time.Now()
+			next := time.Date(now.Year(), now.Month(), now.Day(), reminderHour, 0, 0, 0, now.Location())
+			if !next.After(now) {
+				next = next.AddDate(0, 0, 1)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(next.Sub(now)):
+			}
+			if !m.PushEnabled() {
+				continue // 开关关着：跳过本次，明天再看
+			}
+			res := m.RemindAll(ctx, ReminderText())
+			m.appendLog(LoggedMessage{At: time.Now(), Channel: "all", Dir: "out",
+				From: "每日提醒", Text: ReminderText() + "\n（" + strings.Join(res, "；") + "）",
+				Intent: "remind"})
+		}
+	}()
+}
+
+// Broadcaster 由支持「向所有活跃会话群发」的通道实现。
+// 定义在 bot 包（transport 反过来 import bot，这里不能直接引子包）。
+type Broadcaster interface {
+	// RemindAll 群发文本，返回成功/失败条数。
+	RemindAll(ctx context.Context, text string) (sent, failed int)
+}
+
+// RemindAll 立即向所有有会话上下文的群/用户发一条文本，
+// 返回各通道的发送结果（供网页「立即索要」按钮展示）。
+func (m *Manager) RemindAll(ctx context.Context, text string) []string {
+	m.mu.RLock()
+	ts := make([]Transport, 0, len(m.channels))
+	for _, st := range m.channels {
+		if st.transport != nil {
+			ts = append(ts, st.transport)
+		}
+	}
+	m.mu.RUnlock()
+
+	out := make([]string, 0, len(ts))
+	for _, t := range ts {
+		b, ok := t.(Broadcaster)
+		if !ok {
+			continue
+		}
+		sent, failed := b.RemindAll(ctx, text)
+		label := t.Name()
+		switch label {
+		case "weixin":
+			label = "微信"
+		case "qq":
+			label = "QQ"
+		}
+		out = append(out, fmt.Sprintf("%s 成功 %d / 失败 %d", label, sent, failed))
+		m.appendLog(LoggedMessage{At: time.Now(), Channel: t.Name(), Dir: "out",
+			From: "全部会话", Text: text, Intent: "remind"})
+	}
+	return out
 }
 
 // RecentMessages 返回最近的消息（新的在前）。
@@ -461,16 +553,16 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 	case IntentPushToggle:
 		m.SetPush(intent.Enable)
 		if intent.Enable {
-			out.Text = "已开启日报推送"
+			out.Text = "已开启：每天 1 点自动向大家索要 CSV 文件"
 		} else {
-			out.Text = "已关闭日报推送"
+			out.Text = "已关闭：不再定时索要 CSV 文件"
 		}
 
 	case IntentPushStatus:
 		if m.PushEnabled() {
-			out.Text = "日报推送：已开启"
+			out.Text = "每日 1 点索要 CSV：已开启"
 		} else {
-			out.Text = "日报推送：已关闭"
+			out.Text = "每日 1 点索要 CSV：已关闭"
 		}
 
 	default:
@@ -603,7 +695,7 @@ func HelpText() string {
 		"· 直接发 CSV 文件 —— 默认导入昨天",
 		"· 改名 —— 发抖音号，再回复新名字",
 		"· 改号 —— 发姓名（多个号会让你挑），再回复新抖音号",
-		"· 开启/关闭日报推送 —— 推送开关",
+		"· 开启/关闭日报推送 —— 每天 1 点自动索要 CSV 的提醒开关",
 		"· 帮助 —— 本菜单",
 	}, "\n")
 }
