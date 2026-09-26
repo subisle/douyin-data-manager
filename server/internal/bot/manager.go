@@ -698,7 +698,7 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 			break
 		}
 		out.Images = images
-		out.Text = fmt.Sprintf("%s 日榜（%d 张）", date.Format("1月2日"), len(images))
+		out.Text = fmt.Sprintf("%s 日榜", date.Format("1月2日"))
 
 	case IntentMonthlyReport:
 		period := intent.Period
@@ -763,27 +763,24 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 	return out, nil
 }
 
-// botDailyPageSize 每张日报图的行数上限，与网页导出接口的默认值一致。
-// 50 行/页：男团 90+ 人两张，女团一张——30 行会切成 4 张，太碎。
-const botDailyPageSize = 50
-
-// buildDailyReportImages 生成日报图：女团一张（经典样式），男团按人数分页
-// （苹果样式，超过 botDailyPageSize 行自动切成多张，页脚带 N/M）。
-// 没指定性别就两个团都出；指定了只出该团。
+// buildDailyReportImages 生成日报图（两个工会合并成单张）：女团（经典样式）
+// 与男团（苹果样式）各自渲染后纵向拼接成一张长图发送，群里只占一条图片消息。
+// 某个团当天没数据就跳过；只有一个团有数据时直接用该团渲染结果，不拼接。
+// 男团不再按行分页：合并后分页没有意义，版式高度自适应行数。
 func (m *Manager) buildDailyReportImages(ctx context.Context, date time.Time, gender string) ([]OutboundImage, error) {
 	genders := []string{"female", "male"}
 	if gender == "female" || gender == "male" {
 		genders = []string{gender}
 	}
 
-	images := make([]OutboundImage, 0, 2)
+	parts := make([][]byte, 0, 2)
 	for _, g := range genders {
 		rows, err := m.repo.ListDailyByDate(ctx, date, domain.Gender(g))
 		if err != nil {
 			return nil, err
 		}
 		if len(rows) == 0 {
-			continue // 这个团当天没数据就不占一张图
+			continue // 这个团当天没数据就不画这段
 		}
 
 		all := make([]render.Row, 0, len(rows))
@@ -802,40 +799,36 @@ func (m *Manager) buildDailyReportImages(ctx context.Context, date time.Time, ge
 			})
 		}
 
-		pageCount := (len(all) + botDailyPageSize - 1) / botDailyPageSize
-		for p := 1; p <= pageCount; p++ {
-			start := (p - 1) * botDailyPageSize
-			end := p * botDailyPageSize
-			if end > len(all) {
-				end = len(all)
-			}
-			report := render.Report{
-				Date: date.Format("2006-01-02"), Gender: g,
-				Rows: all[start:end], Stats: all,
-				Columns:   render.DefaultColumns(),
-				PageIndex: p, PageCount: pageCount,
-				PageSize: botDailyPageSize,
-				ShowInactiveFooter: pageCount <= 1 || p == pageCount,
-			}
-			png, err := render.RenderPNG(report, render.ResolveStyle(g, ""))
-			if err != nil {
-				return nil, fmt.Errorf("生成日报图片失败: %w", err)
-			}
-			name := fmt.Sprintf("日报-%s-%s", date.Format("2006-01-02"), genderLabel(g))
-			if pageCount > 1 {
-				name += fmt.Sprintf("-%d", p)
-			}
-			images = append(images, OutboundImage{Data: png, Name: name + ".png"})
+		report := render.Report{
+			Date: date.Format("2006-01-02"), Gender: g,
+			Rows: all, Stats: all,
+			Columns:   render.DefaultColumns(),
+			PageIndex: 1, PageCount: 1,
+			PageSize: len(all),
+			ShowInactiveFooter: true,
 		}
+		png, err := render.RenderPNG(report, render.ResolveStyle(g, ""))
+		if err != nil {
+			return nil, fmt.Errorf("生成日报图片失败: %w", err)
+		}
+		parts = append(parts, png)
 	}
-	return images, nil
-}
 
-func genderLabel(g string) string {
-	if g == "female" {
-		return "女团"
+	if len(parts) == 0 {
+		return nil, nil
 	}
-	return "男团"
+	var data []byte
+	if len(parts) == 1 {
+		data = parts[0]
+	} else {
+		merged, err := render.ConcatVerticalPNG(parts...)
+		if err != nil {
+			return nil, fmt.Errorf("合并日报图片失败: %w", err)
+		}
+		data = merged
+	}
+	name := fmt.Sprintf("日报-%s", date.Format("2006-01-02"))
+	return []OutboundImage{{Data: data, Name: name + ".png"}}, nil
 }
 
 func sumWave(rows []domain.MonthlyMetric) string {
