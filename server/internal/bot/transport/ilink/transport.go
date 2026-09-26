@@ -62,6 +62,7 @@ type Transport struct {
 
 	sessions map[string]sessionCtx
 	inbox    chan bot.Inbound
+	disp     *bot.Dispatcher
 	cancel   context.CancelFunc
 	started  bool
 }
@@ -124,6 +125,8 @@ func (t *Transport) Start(ctx context.Context) error {
 	t.connected = true
 	t.phase = PhaseRunning
 	t.note = ""
+	// 消息处理异步化：CSV 导入要几十秒，不能堵住长轮询循环
+	t.disp = bot.NewDispatcher(runCtx, 2, 5*time.Minute)
 	t.mu.Unlock()
 
 	go t.pollLoop(runCtx)
@@ -175,7 +178,12 @@ func (t *Transport) pollLoop(ctx context.Context) {
 			if msg.MessageType != 1 {
 				continue // 只处理入站消息
 			}
-			t.handleMessage(ctx, msg)
+			// 异步处理：cursor 立刻前移，导入在 worker 里跑。
+			// 同会话串行、跨会话并行（详见 Dispatcher）。
+			m := msg
+			t.disp.Submit(m.ConversationID(), func(ctx context.Context) {
+				t.handleMessage(ctx, m)
+			})
 		}
 
 		if updates.GetUpdatesBuf != "" {

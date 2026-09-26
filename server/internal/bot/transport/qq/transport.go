@@ -57,6 +57,7 @@ type Transport struct {
 
 	sessions map[string]sessionCtx
 	inbox    chan bot.Inbound
+	disp     *bot.Dispatcher
 	cancel   context.CancelFunc
 }
 
@@ -110,6 +111,10 @@ func (t *Transport) Start(ctx context.Context) error {
 	t.cancel = cancel
 	t.running = true
 	t.phase = "connecting"
+	// 消息处理异步化：CSV 导入要几十秒，不能堵住 WS 读循环
+	//（堵了之后续事件全部排队，QQ 侧还会重推，越积越多）。
+	t.mu.Lock()
+	t.disp = bot.NewDispatcher(runCtx, 2, 5*time.Minute)
 	t.mu.Unlock()
 
 	go t.connectLoop(runCtx)
@@ -276,6 +281,17 @@ type dispatchData struct {
 	} `json:"author"`
 }
 
+// getDispatcher 取异步派发器。Start 之前收到消息（理论上不该发生）就同步跑，
+// 别让消息凭空消失。
+func (t *Transport) getDispatcher() *bot.Dispatcher {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if t.disp != nil {
+		return t.disp
+	}
+	return bot.NewDispatcher(context.Background(), 1, 5*time.Minute)
+}
+
 // handleDispatch 处理事件。只关心群 @ 和私聊两种。
 func (t *Transport) handleDispatch(ctx context.Context, eventType string, raw json.RawMessage) {
 	var d dispatchData
@@ -338,7 +354,10 @@ func (t *Transport) handleDispatch(ctx context.Context, eventType string, raw js
 		return
 	}
 
-	out, err := t.handler.Handle(ctx, bot.Inbound{
+	// 处理异步化：导入可能跑几十秒，绝不能堵 WS 读循环。
+	// 会话上下文（sessions）已在上面同步记下，worker 里 Send 拿得到。
+	disp := t.getDispatcher()
+	in := bot.Inbound{
 		Channel:        t.Name(),
 		ConversationID: conversationID,
 		SenderID:       conversationID,
@@ -346,14 +365,17 @@ func (t *Transport) handleDispatch(ctx context.Context, eventType string, raw js
 		AtMe:           true,
 		Attachments:    atts,
 		ReceivedAt:     time.Now(),
+	}
+	disp.Submit(conversationID, func(ctx context.Context) {
+		out, err := t.handler.Handle(ctx, in)
+		if err != nil {
+			t.setNote("处理消息失败: " + err.Error())
+			return
+		}
+		if err := t.Send(ctx, out); err != nil {
+			t.setNote("发送失败: " + err.Error())
+		}
 	})
-	if err != nil {
-		t.setNote("处理消息失败: " + err.Error())
-		return
-	}
-	if err := t.Send(ctx, out); err != nil {
-		t.setNote("发送失败: " + err.Error())
-	}
 }
 
 // Send 实现 bot.Transport。图片走 /files 接口 file_data(base64) 直传拿
