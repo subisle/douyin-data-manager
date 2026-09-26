@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "./api";
+import { api, fmtMinutes } from "./api";
 import type { NavParams } from "./nav";
 
 // 每页行数，与后端 /exports/report.svg 的默认值保持一致。
@@ -123,6 +123,40 @@ export function ExportPage({ params }: { params?: NavParams }) {
   // 逐页抓取并分别下载 PNG（2 倍图），文件名带页码
   const pageSuffix = () => (pageCount > 1 ? `-${page}` : "");
 
+  // 总排名 CSV：按所选月份的累计音浪排名。
+  // 字段固定为 排名 / X月音浪 / 时长 / 未播天数——运营拿去核对用的，
+  // 等级这种内部口径不导出。UTF-8 带 BOM，Excel 双击打开不乱码。
+  const downloadRankCSV = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      const period = date.slice(0, 7);
+      const g = gender === "female" ? "female" : gender === "male" ? "male" : undefined;
+      const rows = await api.monthly(period, g);
+      const sorted = [...rows].sort((a, b) => b.wave - a.wave);
+      const monthLabel = `${parseInt(period.slice(5), 10)}月音浪`;
+      const lines: string[] = [["排名", monthLabel, "时长", "未播天数"].join(",")];
+      sorted.forEach((r, i) => {
+        lines.push(
+          [
+            String(i + 1),
+            String(r.wave),
+            r.formattedDuration || fmtMinutes(r.minutes),
+            String(r.absentDays),
+          ].join(","),
+        );
+      });
+      download(
+        new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }),
+        `总排名-${period}-${gender === "female" ? "女团" : "男团"}.csv`,
+      );
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const downloadAllPages = async () => {
     setBusy(true);
     setErr("");
@@ -222,6 +256,10 @@ export function ExportPage({ params }: { params?: NavParams }) {
         <button onClick={() => void load({ page: 1 })} disabled={busy}>
           生成预览
         </button>
+        <button className="ghost" disabled={busy} onClick={() => void downloadRankCSV()}>
+          下载总排名 CSV
+        </button>
+        <span className="tiny muted">按所选月份：排名 / X月音浪 / 时长 / 未播天数</span>
       </div>
 
       {pageCount > 1 && (
