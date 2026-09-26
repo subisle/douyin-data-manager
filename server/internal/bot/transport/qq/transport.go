@@ -113,7 +113,7 @@ func (t *Transport) Start(ctx context.Context) error {
 	t.phase = "connecting"
 	// 消息处理异步化：CSV 导入要几十秒，不能堵住 WS 读循环
 	//（堵了之后续事件全部排队，QQ 侧还会重推，越积越多）。
-	t.mu.Lock()
+	// 此处已持有 t.mu，直接赋值；再 Lock 会死锁，服务起不来。
 	t.disp = bot.NewDispatcher(runCtx, 2, 5*time.Minute)
 	t.mu.Unlock()
 
