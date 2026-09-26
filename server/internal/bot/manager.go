@@ -298,8 +298,9 @@ func (m *Manager) SetPush(enabled bool) {
 const reminderHour = 1
 
 // ReminderText 定时/手动索要文件时发的文案。
-func ReminderText() string {
-	return "麻烦大家把昨天的音浪与时长 CSV 文件发一下～\n直接传文件即可（默认进昨天；指定日期先发「X号数据」，不导了发 q）。"
+// X 日 = 昨天：数据是 T+1 的，1 号凌晨 1 点要的是上月末那天的文件。
+func ReminderText(now time.Time) string {
+	return fmt.Sprintf("请发送%s的音浪文件即可", friendlyDate(now.AddDate(0, 0, -1).Format("2006-01-02")))
 }
 
 // StartReminderLoop 每天 reminderHour 点向所有活跃会话索要 CSV 文件。
@@ -320,9 +321,9 @@ func (m *Manager) StartReminderLoop(ctx context.Context) {
 			if !m.PushEnabled() {
 				continue // 开关关着：跳过本次，明天再看
 			}
-			res := m.RemindAll(ctx, ReminderText())
+			res := m.RemindAll(ctx, ReminderText(time.Now()))
 			m.appendLog(LoggedMessage{At: time.Now(), Channel: "all", Dir: "out",
-				From: "每日提醒", Text: ReminderText() + "\n（" + strings.Join(res, "；") + "）",
+				From: "每日提醒", Text: ReminderText(time.Now()) + "\n（" + strings.Join(res, "；") + "）",
 				Intent: "remind"})
 		}
 	}()
@@ -626,7 +627,7 @@ func (m *Manager) buildDailyReportImages(ctx context.Context, date time.Time, ge
 			report := render.Report{
 				Date: date.Format("2006-01-02"), Gender: g,
 				Rows: all[start:end], Stats: all,
-				Columns: render.DefaultColumns(),
+				Columns:   render.DefaultColumns(),
 				PageIndex: p, PageCount: pageCount,
 				ShowInactiveFooter: pageCount <= 1 || p == pageCount,
 			}

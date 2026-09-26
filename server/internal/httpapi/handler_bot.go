@@ -103,8 +103,8 @@ func (s *Server) botRemind(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"text":     bot.ReminderText(),
-		"channels": m.RemindAll(ctx, bot.ReminderText()),
+		"text":     bot.ReminderText(time.Now()),
+		"channels": m.RemindAll(ctx, bot.ReminderText(time.Now())),
 	})
 }
 
