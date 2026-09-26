@@ -273,11 +273,15 @@ func (t *Transport) collectAttachments(msg InboundMessage) []bot.Attachment {
 
 // RemindAll 给所有有会话上下文的群/用户发同一条文本（每日 1 点索要 CSV 用）。
 // iLink 发消息必须带原消息的 context_token，所以只能覆盖「聊过天的」会话——
-// 没聊过的本来也进不了 sessions。
-func (t *Transport) RemindAll(ctx context.Context, text string) (sent, failed int) {
+// 没聊过的本来也进不了 sessions。范围由 opt 圈定（群聊/私聊独立开关）。
+func (t *Transport) RemindAll(ctx context.Context, text string, opt bot.RemindOptions) (sent, failed int) {
 	t.mu.RLock()
 	list := make([]sessionCtx, 0, len(t.sessions))
 	for _, sc := range t.sessions {
+		// groupId 为空 = 私聊；非空 = 群聊
+		if (sc.groupId != "" && !opt.Groups) || (sc.groupId == "" && !opt.Private) {
+			continue
+		}
 		list = append(list, sc)
 	}
 	t.mu.RUnlock()

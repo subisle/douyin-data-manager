@@ -283,10 +283,14 @@ type dispatchData struct {
 
 // RemindAll 给所有聊过的群/用户发主动消息（不带 msg_id）。
 // 官方对主动消息有频率限制，失败的按条计，不中断其余会话。
-func (t *Transport) RemindAll(ctx context.Context, text string) (sent, failed int) {
+// 范围由 opt 圈定（群聊/私聊独立开关）。
+func (t *Transport) RemindAll(ctx context.Context, text string, opt bot.RemindOptions) (sent, failed int) {
 	t.mu.RLock()
 	convs := make([]sessionCtx, 0, len(t.sessions))
 	for _, sc := range t.sessions {
+		if (sc.groupOpenID != "" && !opt.Groups) || (sc.groupOpenID == "" && !opt.Private) {
+			continue
+		}
 		convs = append(convs, sc)
 	}
 	t.mu.RUnlock()

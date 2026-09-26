@@ -84,9 +84,16 @@ type Manager struct {
 	mu         sync.RWMutex
 	channels   map[string]*channelState
 	push       bool
+	targets    ReminderTargets
 	log        []LoggedMessage
 	pending    map[string]*pendingImport // 导入日期口令，key 是会话 ID
 	pendingOps map[string]*pendingOp     // 改名/改号对话，key 是会话 ID
+}
+
+// ReminderTargets 索要提醒的发送范围：群聊、私聊各自独立开关。
+type ReminderTargets struct {
+	Groups  bool `json:"groups"`
+	Private bool `json:"private"`
 }
 
 // IsQuitCommand 是否「退出当前流程」口令。
@@ -176,13 +183,17 @@ func NewManager(r *repo.Repo) *Manager {
 		},
 		log:     []LoggedMessage{},
 		pending: map[string]*pendingImport{},
+		targets: ReminderTargets{Groups: true, Private: true}, // 缺省全开，与历史行为一致
 	}
-	// 推送开关持久化在 app_setting：容器天天重启，内存态撑不到凌晨 1 点
+	// 开关持久化在 app_setting：容器天天重启，内存态撑不到凌晨 1 点
 	if r != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if enabled, err := r.GetPushEnabled(ctx); err == nil {
 			m.push = enabled
+		}
+		if groups, private, err := r.GetReminderTargets(ctx); err == nil {
+			m.targets = ReminderTargets{Groups: groups, Private: private}
 		}
 	}
 	return m
@@ -321,7 +332,12 @@ func (m *Manager) StartReminderLoop(ctx context.Context) {
 			if !m.PushEnabled() {
 				continue // 开关关着：跳过本次，明天再看
 			}
-			res := m.RemindAll(ctx, ReminderText(time.Now()))
+			// 范围在发送前现取：网页上的开关随时可能被改
+			opt := RemindOptions{Groups: m.GetReminderTargets().Groups, Private: m.GetReminderTargets().Private}
+			if !opt.Groups && !opt.Private {
+				continue // 群聊私聊都关了：没东西可发
+			}
+			res := m.RemindAll(ctx, ReminderText(time.Now()), opt)
 			m.appendLog(LoggedMessage{At: time.Now(), Channel: "all", Dir: "out",
 				From: "每日提醒", Text: ReminderText(time.Now()) + "\n（" + strings.Join(res, "；") + "）",
 				Intent: "remind"})
@@ -329,16 +345,44 @@ func (m *Manager) StartReminderLoop(ctx context.Context) {
 	}()
 }
 
+// ReminderTargets 当前索要范围（群聊/私聊）。
+func (m *Manager) GetReminderTargets() ReminderTargets {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.targets
+}
+
+// SetReminderTargets 设置并持久化索要范围。
+func (m *Manager) SetReminderTargets(groups, private bool) {
+	m.mu.Lock()
+	m.targets = ReminderTargets{Groups: groups, Private: private}
+	m.mu.Unlock()
+	if m.repo != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := m.repo.SetReminderTargets(ctx, groups, private); err != nil {
+			m.appendLog(LoggedMessage{At: time.Now(), Channel: "all", Dir: "out",
+				From: "系统", Text: "索要范围持久化失败：" + err.Error(), Intent: "remind"})
+		}
+	}
+}
+
 // Broadcaster 由支持「向所有活跃会话群发」的通道实现。
 // 定义在 bot 包（transport 反过来 import bot，这里不能直接引子包）。
 type Broadcaster interface {
-	// RemindAll 群发文本，返回成功/失败条数。
-	RemindAll(ctx context.Context, text string) (sent, failed int)
+	// RemindAll 按 opt 圈定的范围群发文本，返回成功/失败条数。
+	RemindAll(ctx context.Context, text string, opt RemindOptions) (sent, failed int)
+}
+
+// RemindOptions 单次群发的范围。
+type RemindOptions struct {
+	Groups  bool // 发群聊
+	Private bool // 发私聊
 }
 
 // RemindAll 立即向所有有会话上下文的群/用户发一条文本，
 // 返回各通道的发送结果（供网页「立即索要」按钮展示）。
-func (m *Manager) RemindAll(ctx context.Context, text string) []string {
+func (m *Manager) RemindAll(ctx context.Context, text string, opt RemindOptions) []string {
 	m.mu.RLock()
 	ts := make([]Transport, 0, len(m.channels))
 	for _, st := range m.channels {
@@ -354,7 +398,7 @@ func (m *Manager) RemindAll(ctx context.Context, text string) []string {
 		if !ok {
 			continue
 		}
-		sent, failed := b.RemindAll(ctx, text)
+		sent, failed := b.RemindAll(ctx, text, opt)
 		label := t.Name()
 		switch label {
 		case "weixin":

@@ -32,7 +32,38 @@ func (s *Server) botStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"channels": m.Status(),
 		"push":     m.PushEnabled(),
+		"reminder": m.GetReminderTargets(),
 	})
+}
+
+// botSetReminderTargets POST /api/v1/bots/push/targets {"groups":true,"private":false}
+//
+// 索要提醒的发送范围：群聊与私聊各自独立开关。
+func (s *Server) botSetReminderTargets(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.botManager()
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "BOTS_DISABLED", "机器人未启用")
+		return
+	}
+	var req struct {
+		Groups  *bool `json:"groups"`
+		Private *bool `json:"private"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "请求体不是合法 JSON")
+		return
+	}
+	// 未传的字段保持现值，避免前端漏字段把开关悄悄关掉
+	cur := m.GetReminderTargets()
+	groups, private := cur.Groups, cur.Private
+	if req.Groups != nil {
+		groups = *req.Groups
+	}
+	if req.Private != nil {
+		private = *req.Private
+	}
+	m.SetReminderTargets(groups, private)
+	writeJSON(w, http.StatusOK, map[string]any{"reminder": m.GetReminderTargets()})
 }
 
 // botStart POST /api/v1/bots/{name}/start
@@ -99,12 +130,14 @@ func (s *Server) botRemind(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "BOTS_DISABLED", "机器人未启用")
 		return
 	}
-	// 群发可能要几十秒（逐会话发），给足超时
+	// 群发可能要几十秒（逐会话发），给足超时；范围按当前开关走
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
+	targets := m.GetReminderTargets()
+	opt := bot.RemindOptions{Groups: targets.Groups, Private: targets.Private}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"text":     bot.ReminderText(time.Now()),
-		"channels": m.RemindAll(ctx, bot.ReminderText(time.Now())),
+		"channels": m.RemindAll(ctx, bot.ReminderText(time.Now()), opt),
 	})
 }
 

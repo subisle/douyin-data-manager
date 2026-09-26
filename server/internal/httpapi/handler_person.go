@@ -455,7 +455,7 @@ func (s *Server) importAnchorsPreview(w http.ResponseWriter, r *http.Request) {
 		AnchorID string `json:"anchorId"`
 		DouyinNo string `json:"douyinNo"`
 		Name     string `json:"name"`
-		Bound    bool   `json:"bound"`           // 该号已在主播库中
+		Bound    bool   `json:"bound"`             // 该号已在主播库中
 		BoundTo  string `json:"boundTo,omitempty"` // 绑给了谁
 	}
 	items := make([]item, 0, len(rows))

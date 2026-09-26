@@ -7,10 +7,10 @@ import (
 )
 
 const (
-	svgScale   = 2
-	fontSans   = "-apple-system, BlinkMacSystemFont, SF Pro Display, SF Pro Text, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
-	fontMono   = "SF Mono, Menlo, Consolas, monospace"
-	fontSerif  = "Georgia, Times New Roman, serif"
+	svgScale  = 2
+	fontSans  = "-apple-system, BlinkMacSystemFont, SF Pro Display, SF Pro Text, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
+	fontMono  = "SF Mono, Menlo, Consolas, monospace"
+	fontSerif = "Georgia, Times New Roman, serif"
 	// apple 样式的主色，进度条填充与强调都用这个（取自 615 的 const blue）
 	blue = "#007AFF"
 	// 615 canvas 的默认输出倍率是 scale=2，逻辑宽度由内容实测决定
@@ -60,11 +60,11 @@ func truncateToWidth(s string, maxW float64, px float64, bold bool) string {
 /* ═══════════════════ 列定义（对齐 615 getColumnDefinitions） ═══════════════════ */
 
 type colDef struct {
-	key     string
-	label   string
-	minW    float64
-	flex    float64
-	align   string // left / center / right
+	key   string
+	label string
+	minW  float64
+	flex  float64
+	align string // left / center / right
 }
 
 // columnOrder 与 615 一致：排名 姓名 未播 日音浪 累计 时长 师傅 等级。

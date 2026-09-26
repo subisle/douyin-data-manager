@@ -10,6 +10,8 @@ import (
 // 别拿来当缓存用——读写都走数据库。
 
 const keyPushEnabled = "push_enabled"
+const keyRemindGroup = "remind_group"
+const keyRemindPrivate = "remind_private"
 
 // GetSetting 读取设置；不存在返回 ErrNotFound。
 func (r *Repo) GetSetting(ctx context.Context, key string) (string, error) {
@@ -53,4 +55,31 @@ func (r *Repo) SetPushEnabled(ctx context.Context, enabled bool) error {
 		v = "1"
 	}
 	return r.SetSetting(ctx, keyPushEnabled, v)
+}
+
+// GetReminderTargets 读索要范围（群聊/私聊），缺省都开——与历史行为一致。
+func (r *Repo) GetReminderTargets(ctx context.Context) (groups, private bool, err error) {
+	groups, private = true, true
+	if v, err := r.GetSetting(ctx, keyRemindGroup); err == nil {
+		groups = v == "1"
+	}
+	if v, err := r.GetSetting(ctx, keyRemindPrivate); err == nil {
+		private = v == "1"
+	}
+	return groups, private, nil
+}
+
+// SetReminderTargets 持久化索要范围。
+func (r *Repo) SetReminderTargets(ctx context.Context, groups, private bool) error {
+	g, p := "0", "0"
+	if groups {
+		g = "1"
+	}
+	if private {
+		p = "1"
+	}
+	if err := r.SetSetting(ctx, keyRemindGroup, g); err != nil {
+		return err
+	}
+	return r.SetSetting(ctx, keyRemindPrivate, p)
 }

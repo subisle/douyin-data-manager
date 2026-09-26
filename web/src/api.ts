@@ -238,6 +238,11 @@ export interface LoginStatus {
   note?: string;
 }
 
+export interface ReminderTargets {
+  groups: boolean;
+  private: boolean;
+}
+
 export interface InjectMedia {
   name: string;
   size: number;
@@ -382,7 +387,15 @@ export const api = {
   // ---------------- 机器人 ----------------
 
   botStatus: () =>
-    request<{ channels: BotChannelStatus[]; push: boolean }>("/bots/status"),
+    request<{ channels: BotChannelStatus[]; push: boolean; reminder: ReminderTargets }>(
+      "/bots/status",
+    ),
+
+  botSetReminderTargets: (groups: boolean, isPrivate: boolean) =>
+    request<{ reminder: ReminderTargets }>("/bots/push/targets", {
+      method: "POST",
+      body: JSON.stringify({ groups, private: isPrivate }),
+    }),
 
   botStart: (name: string) => request<null>(`/bots/${name}/start`, { method: "POST" }),
 

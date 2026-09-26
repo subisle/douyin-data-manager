@@ -269,9 +269,9 @@ func (c *Client) GetQRCodeStatus(ctx context.Context, qrcode string) (*QRCodeSta
 // Item 消息内容项。type 编号与 615 的 extractMessagePreview 一致：
 // 1 文本 / 2 图片 / 3 语音 / 4 文件 / 5 视频。
 type Item struct {
-	Type     int        `json:"type"`
-	TextItem *TextItem  `json:"text_item,omitempty"`
-	FileItem *FileItem  `json:"file_item,omitempty"`
+	Type      int        `json:"type"`
+	TextItem  *TextItem  `json:"text_item,omitempty"`
+	FileItem  *FileItem  `json:"file_item,omitempty"`
 	ImageItem *ImageItem `json:"image_item,omitempty"`
 }
 
@@ -385,8 +385,8 @@ type outFileItem struct {
 }
 
 type outItem struct {
-	Type      int           `json:"type"`
-	TextItem  struct {
+	Type     int `json:"type"`
+	TextItem struct {
 		Text string `json:"text"`
 	} `json:"text_item,omitempty"`
 	ImageItem *outImageItem `json:"image_item,omitempty"`

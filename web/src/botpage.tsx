@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { api, type BotChannelStatus, type BotLog } from "./api";
+import { api, type BotChannelStatus, type BotLog, type ReminderTargets } from "./api";
 
 const CHANNEL_META: Record<string, { label: string; icon: string; hint: string }> = {
   weixin: {
@@ -87,6 +87,7 @@ const nowLabel = () =>
 export function BotPage() {
   const [status, setStatus] = useState<BotChannelStatus[]>([]);
   const [push, setPush] = useState(false);
+  const [targets, setTargets] = useState<ReminderTargets>({ groups: true, private: true });
   const [err, setErr] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
@@ -102,6 +103,7 @@ export function BotPage() {
       const data = await api.botStatus();
       setStatus(data.channels ?? []);
       setPush(data.push);
+      if (data.reminder) setTargets(data.reminder);
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -357,7 +359,7 @@ export function BotPage() {
                       {
                         id: ++seq.current,
                         dir: "out" as const,
-                        text: `📣 已向全部活跃会话发送索要提醒：\n${r.text}\n${r.channels.join("；") || "（没有可发送的会话）"}`,
+                        text: `📣 已按当前范围发送索要提醒：\n${r.text}\n${r.channels.join("；") || "（没有可发送的会话）"}`,
                         at: nowLabel(),
                       },
                     ]);
@@ -369,6 +371,39 @@ export function BotPage() {
                 }}
               >
                 立即索要
+              </button>
+            </div>
+
+            {/* 索要范围：群聊 / 私聊独立开关，管的是定时与「立即索要」两者 */}
+            <div className="toolbar" style={{ marginBottom: 12 }}>
+              <span className="tiny muted">索要范围</span>
+              <button
+                className={targets.groups ? "chip on" : "chip"}
+                disabled={busy}
+                onClick={async () => {
+                  try {
+                    const r = await api.botSetReminderTargets(!targets.groups, targets.private);
+                    setTargets(r.reminder);
+                  } catch (e) {
+                    setErr((e as Error).message);
+                  }
+                }}
+              >
+                👥 群聊{targets.groups ? "：发" : "：不发"}
+              </button>
+              <button
+                className={targets.private ? "chip on" : "chip"}
+                disabled={busy}
+                onClick={async () => {
+                  try {
+                    const r = await api.botSetReminderTargets(targets.groups, !targets.private);
+                    setTargets(r.reminder);
+                  } catch (e) {
+                    setErr((e as Error).message);
+                  }
+                }}
+              >
+                🔒 私聊{targets.private ? "：发" : "：不发"}
               </button>
             </div>
 

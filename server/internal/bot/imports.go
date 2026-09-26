@@ -287,6 +287,7 @@ func fetchAttachment(ctx context.Context, att Attachment) ([]byte, error) {
 	}
 	return downloadAttachment(ctx, att.URL)
 }
+
 // 协议相对地址（//…）补 https。强制大小上限，防止把内存吃爆。
 func downloadAttachment(ctx context.Context, rawURL string) ([]byte, error) {
 	url := strings.TrimSpace(rawURL)
