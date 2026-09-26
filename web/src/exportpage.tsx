@@ -134,8 +134,9 @@ export function ExportPage({ params }: { params?: NavParams }) {
   const pageSuffix = () => (pageCount > 1 ? `-${page}` : "");
 
   // 总排名 CSV：按所选月份的累计音浪排名。
-  // 字段固定为 排名 / X月音浪 / 时长 / 未播天数——运营拿去核对用的，
-  // 等级这种内部口径不导出。UTF-8 带 BOM，Excel 双击打开不乱码。
+  // 字段：排名 / 主播姓名 / X月音浪 / 时长 / 未播天数（不含等级）。
+  // 姓名列是给 PSD 导入脚本用的（脚本按 排名+姓名 两列工作）。
+  // UTF-8 带 BOM，Excel 双击打开不乱码。
   const downloadRankCSV = async () => {
     setBusy(true);
     setErr("");
@@ -145,11 +146,12 @@ export function ExportPage({ params }: { params?: NavParams }) {
       const rows = (await api.monthly(period, g)) ?? [];
       const sorted = [...rows].sort((a, b) => b.wave - a.wave);
       const monthLabel = `${parseInt(period.slice(5), 10)}月音浪`;
-      const lines: string[] = [["排名", monthLabel, "时长", "未播天数"].join(",")];
+      const lines: string[] = [["排名", "主播姓名", monthLabel, "时长", "未播天数"].join(",")];
       sorted.forEach((r, i) => {
         lines.push(
           [
             String(i + 1),
+            r.name || "",
             String(r.wave),
             r.formattedDuration || fmtMinutes(r.minutes),
             String(r.absentDays),
