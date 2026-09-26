@@ -151,3 +151,24 @@ func TestParseColumnSet(t *testing.T) {
 		t.Error("空组合应报错")
 	}
 }
+
+func TestRankBase(t *testing.T) {
+	// 男团 90 人、50 行/页 → 两页 50+40。第 2 页第一行排名必须是 51；
+	// 旧公式 (PageIndex-1)*len(本页) 会算出 40，与第 1 页的 41-50 重叠。
+	page2 := Report{PageIndex: 2, PageCount: 2, PageSize: 50, Rows: make([]Row, 40)}
+	if got := page2.rankBase(); got != 50 {
+		t.Errorf("第 2 页 rankBase = %d，期望 50", got)
+	}
+
+	// 未传 PageSize 时退回按当前页行数估算（每页等长时等价，兼容旧调用方）
+	legacy := Report{PageIndex: 2, PageCount: 2, Rows: make([]Row, 50)}
+	if got := legacy.rankBase(); got != 50 {
+		t.Errorf("兼容路径 rankBase = %d，期望 50", got)
+	}
+
+	// 首页基准必须是 0
+	first := Report{PageIndex: 1, PageCount: 1, PageSize: 50, Rows: make([]Row, 50)}
+	if got := first.rankBase(); got != 0 {
+		t.Errorf("第 1 页 rankBase = %d，期望 0", got)
+	}
+}

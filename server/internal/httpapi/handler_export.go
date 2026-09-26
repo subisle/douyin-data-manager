@@ -131,6 +131,7 @@ func (s *Server) exportReport(w http.ResponseWriter, r *http.Request) {
 		Columns:            cols,
 		PageIndex:          page,
 		PageCount:          pageCount,
+		PageSize:           pageSize,
 		InactiveLines:      wrapLines(groupInactive(inactive), 58),
 		ShowInactiveFooter: pageCount <= 1 || page >= pageCount,
 	}

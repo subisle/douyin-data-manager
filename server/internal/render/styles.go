@@ -330,10 +330,7 @@ func renderClassic(r Report) string {
 	y += tableHeaderHeight
 
 	maxWave := maxLiveWave(r.Rows)
-	rankOffset := 0
-	if r.PageIndex > 1 && len(r.Rows) > 0 {
-		rankOffset = (r.PageIndex - 1) * len(r.Rows)
-	}
+	rankOffset := r.rankBase()
 
 	for i, row := range r.Rows {
 		rank := rankOffset + i + 1
@@ -641,10 +638,7 @@ func renderApple(r Report) string {
 
 	maxWave := maxLiveWave(r.Rows)
 	maxDur := maxDuration(r.Stats)
-	rankOffset := 0
-	if r.PageIndex > 1 && len(r.Rows) > 0 {
-		rankOffset = (r.PageIndex - 1) * len(r.Rows)
-	}
+	rankOffset := r.rankBase()
 
 	for i, row := range r.Rows {
 		rank := rankOffset + i + 1

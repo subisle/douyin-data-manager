@@ -112,8 +112,23 @@ type Report struct {
 	Columns            ColumnSet
 	PageIndex          int
 	PageCount          int
+	PageSize           int // 每页行数；分页时全局排名要靠它算，未传则按当前页行数估算
 	InactiveLines      []string // 未播名单，已按师傅分组并折行
 	ShowInactiveFooter bool
+}
+
+// rankBase 当前页第一行的排名偏移（0-based；渲染时 rank = rankBase + i + 1）。
+// 旧公式 (PageIndex-1)*len(本页行数) 在最后一页不满页时算错：男团 90 人
+// 分 50+40 两页，第 2 页排名会从 41 开始（应为 51），与第 1 页重叠错乱。
+func (r Report) rankBase() int {
+	if r.PageIndex <= 1 {
+		return 0
+	}
+	perPage := r.PageSize
+	if perPage <= 0 {
+		perPage = len(r.Rows)
+	}
+	return (r.PageIndex - 1) * perPage
 }
 
 // RenderSVG 生成 SVG。

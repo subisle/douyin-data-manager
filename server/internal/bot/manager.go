@@ -814,6 +814,7 @@ func (m *Manager) buildDailyReportImages(ctx context.Context, date time.Time, ge
 				Rows: all[start:end], Stats: all,
 				Columns:   render.DefaultColumns(),
 				PageIndex: p, PageCount: pageCount,
+				PageSize: botDailyPageSize,
 				ShowInactiveFooter: pageCount <= 1 || p == pageCount,
 			}
 			png, err := render.RenderPNG(report, render.ResolveStyle(g, ""))
