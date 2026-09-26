@@ -12,6 +12,14 @@ const todayLocal = () => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
+// 数据 T+1：能看到的最新一天是昨天
+const dataDayLocal = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
 // 把 SVG 画到 canvas 再导出 PNG。
 // 走浏览器渲染是刻意的：emoji 奖牌、中文字体、水印只有真实浏览器能画对。
 async function svgToPng(svgText: string, scale = 2): Promise<Blob> {
@@ -69,7 +77,8 @@ const DEFAULT_VISIBLE = ["rank", "name", "notLiveDays", "dailyWave", "totalWave"
  * 超过一页（50 行/页）时可翻页，也能一键把每一页分别下载成 PNG。
  */
 export function ExportPage({ params }: { params?: NavParams }) {
-  const [date, setDate] = useState(() => params?.date ?? todayLocal());
+  // 默认昨天：数据 T+1，今天还没数，默认今天会让预览直接空掉
+  const [date, setDate] = useState(() => params?.date ?? dataDayLocal());
   const [gender, setGender] = useState(() => params?.gender ?? "female");
   const [style, setStyle] = useState("auto");
   const [visible, setVisible] = useState<string[]>(DEFAULT_VISIBLE);
@@ -94,7 +103,8 @@ export function ExportPage({ params }: { params?: NavParams }) {
     setErr("");
     try {
       // 先拿总行数算页数（50 行/页，与后端默认一致），再取当前页
-      const rows = await api.daily(d, g === "female" ? "female" : g === "male" ? "male" : undefined);
+      // （?? []：该日没数据时后端历史版本可能返回 null）
+      const rows = (await api.daily(d, g === "female" ? "female" : g === "male" ? "male" : undefined)) ?? [];
       const pc = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
       setPageCount(pc);
       const cur = Math.min(p, pc);
@@ -132,7 +142,7 @@ export function ExportPage({ params }: { params?: NavParams }) {
     try {
       const period = date.slice(0, 7);
       const g = gender === "female" ? "female" : gender === "male" ? "male" : undefined;
-      const rows = await api.monthly(period, g);
+      const rows = (await api.monthly(period, g)) ?? [];
       const sorted = [...rows].sort((a, b) => b.wave - a.wave);
       const monthLabel = `${parseInt(period.slice(5), 10)}月音浪`;
       const lines: string[] = [["排名", monthLabel, "时长", "未播天数"].join(",")];

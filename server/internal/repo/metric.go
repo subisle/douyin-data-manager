@@ -364,6 +364,9 @@ func (r *Repo) ListDailyByDate(ctx context.Context, date time.Time, gender domai
 	if err := r.db.SelectContext(ctx, &out, query, args...); err != nil {
 		return nil, fmt.Errorf("查询日榜: %w", err)
 	}
+	if out == nil {
+		out = []domain.DailyMetric{} // 空结果序列化成 [] 而不是 null，前端少一层判空
+	}
 	return out, nil
 }
 
@@ -387,6 +390,9 @@ func (r *Repo) ListMonthlyByPeriod(ctx context.Context, period string, gender do
 	var out []domain.MonthlyMetric
 	if err := r.db.SelectContext(ctx, &out, query, args...); err != nil {
 		return nil, fmt.Errorf("查询月榜: %w", err)
+	}
+	if out == nil {
+		out = []domain.MonthlyMetric{} // 空结果序列化成 [] 而不是 null，前端少一层判空
 	}
 	return out, nil
 }
