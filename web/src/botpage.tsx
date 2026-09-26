@@ -332,7 +332,7 @@ export function BotPage() {
                 {onlineCount > 0 ? `${onlineCount} 个通道运行中` : "全部离线"}
               </span>
               <span className="spacer" />
-              <span className="tiny muted">每日 1 点索要 CSV</span>
+              <span className="tiny muted">每日 0 点索要 CSV</span>
               <button
                 className={push ? "btn-sm ghost" : "btn-sm"}
                 onClick={async () => {

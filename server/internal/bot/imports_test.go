@@ -63,18 +63,18 @@ func TestPendingImportWindow(t *testing.T) {
 		t.Fatalf("预告日期 = %s, want 2026-09-11", got)
 	}
 
-	// 连传两个文件：第一个扣掉后还剩 1，第二个用满即清
+	// 连传文件：第一个扣掉后还剩 11（上限提到 12 以容纳多工会），第二个继续可用
 	m.consumePending(pending, "wave")
 	_, source, pending2 := m.resolveInboundImportDate(conv)
-	if source != "pending" || pending2 == nil || pending2.remaining != 1 {
-		t.Fatalf("第一个文件后应剩 1 个名额, got remaining=%v source=%s", pending2, source)
+	if source != "pending" || pending2 == nil || pending2.remaining != pendingImportMaxFiles-1 {
+		t.Fatalf("第一个文件后应剩 %d 个名额, got remaining=%v source=%s", pendingImportMaxFiles-1, pending2, source)
 	}
 	m.consumePending(pending2, "duration")
 
-	// 用满后回退昨天
-	_, source, _ = m.resolveInboundImportDate(conv)
-	if source != "yesterday" {
-		t.Fatalf("口令用满后应为 yesterday, got %s", source)
+	// 没用满：口令仍在，继续可传（多工会会连发很多个文件）
+	_, source, pending3 := m.resolveInboundImportDate(conv)
+	if source != "pending" || pending3 == nil || pending3.remaining != pendingImportMaxFiles-2 {
+		t.Fatalf("前两个文件后应剩 %d 个名额, got remaining=%v source=%s", pendingImportMaxFiles-2, pending3, source)
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -22,12 +23,81 @@ import (
 	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"douyin-server/internal/csvparse"
+	"douyin-server/internal/render"
 	"douyin-server/internal/repo"
 )
 
 const maxDownloadBytes = 20 << 20 // 20MB，QQ 附件直链也按这个限
 
 var downloadClient = &http.Client{Timeout: 60 * time.Second}
+
+// importSummary 索要会话的累计汇总：多工会多文件导完后合并汇报
+// 「多少主播、多少音浪、前三名」。
+type importSummary struct {
+	persons   map[string]string // anchorID -> 展示名（CSV 姓名，缺了用 ID）
+	waves     map[string]int64  // anchorID -> 音浪值
+	waveTotal int64
+}
+
+func newImportSummary() *importSummary {
+	return &importSummary{persons: map[string]string{}, waves: map[string]int64{}}
+}
+
+// add 把一次导入的匹配行并入汇总。kind=wave 时累计音浪，时长只计人头。
+func (s *importSummary) add(preview repo.ImportPreview, kind csvparse.Kind) {
+	for _, row := range preview.Rows {
+		if row.PersonID == nil || row.AnchorID == "" {
+			continue // 只统计真正入库的行
+		}
+		name := row.Name
+		if name == "" {
+			name = row.AnchorID
+		}
+		s.persons[row.AnchorID] = name
+		if kind == csvparse.KindWave {
+			if prev, ok := s.waves[row.AnchorID]; !ok || row.Next > prev {
+				s.waveTotal += row.Next - prev
+				s.waves[row.AnchorID] = row.Next
+			}
+		}
+	}
+}
+
+// build 生成汇总文案；没有任何入库行时返回空串。
+func (s *importSummary) build() string {
+	if len(s.persons) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "📦 本次共导入 %d 位主播的数据", len(s.persons))
+	if s.waveTotal > 0 {
+		fmt.Fprintf(&b, "，音浪合计 %s", render.FormatWave(s.waveTotal))
+	}
+	b.WriteString("。")
+
+	type kv struct {
+		name string
+		wave int64
+	}
+	top := make([]kv, 0, 3)
+	for id, w := range s.waves {
+		top = append(top, kv{name: s.persons[id], wave: w})
+	}
+	sort.Slice(top, func(i, j int) bool { return top[i].wave > top[j].wave })
+	if len(top) > 3 {
+		top = top[:3]
+	}
+	if len(top) > 0 {
+		b.WriteString("\n🏆 前三名：")
+		medals := []string{"🥇", "🥈", "🥉"}
+		items := make([]string, 0, len(top))
+		for i, t := range top {
+			items = append(items, fmt.Sprintf("%s%s %s", medals[i], t.name, render.FormatWave(t.wave)))
+		}
+		b.WriteString(strings.Join(items, "、"))
+	}
+	return b.String()
+}
 
 // rememberImportDate 记住某会话的导入日期口令。
 func (m *Manager) rememberImportDate(conversationID, date string) {
@@ -185,6 +255,9 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 		return out, fmt.Errorf("收尾导入批次: %w", err)
 	}
 
+	// 数据更新了：安排自动日报（防抖合并音浪+时长两份，只推一次）
+	m.ScheduleAutoReport(date)
+
 	// 记一笔导入账（与 615 共用 import_records 表，双端互相去重）
 	if err := m.repo.InsertImportRecord(ctx, string(kind), date,
 		fileHash, dataHash, att.FileName, affected, &repo.ImportStats{
@@ -197,8 +270,18 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 		out.Text += "\n（注意：导入记录写入失败，同一文件可能被再次导入）"
 	}
 
+	// 汇总统计：并入会话累计（有口令时跨文件合并，最后一份文件给总数）
+	var sum *importSummary
 	if pending != nil {
+		if pending.sum == nil {
+			pending.sum = newImportSummary()
+		}
+		pending.sum.add(preview, kind)
+		sum = pending.sum
 		m.consumePending(pending, kind)
+	} else {
+		sum = newImportSummary()
+		sum.add(preview, kind)
 	}
 
 	// 汇报文案与 615 逐字对齐，运营看惯了这格式
@@ -267,6 +350,14 @@ func (m *Manager) handleInboundFile(ctx context.Context, in Inbound, now time.Ti
 	}
 	if len(skipped) > 0 && len(skipped) < 6 {
 		lines = append(lines, "非法未入库账号："+strings.Join(skipped, "、"))
+	}
+	// 会话汇总：多工会多文件导完后给总数（主播数/音浪合计/前三名）；
+	// 没有口令的单文件也算一轮，直接给。
+	sessionDone := pending == nil || pending.remaining <= 0
+	if sessionDone {
+		if s := sum.build(); s != "" {
+			lines = append(lines, s)
+		}
 	}
 	out.Text = strings.Join(lines, "\n")
 	return out, nil

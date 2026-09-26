@@ -23,6 +23,7 @@ const (
 	IntentPersonQuery   IntentKind = "person_query"
 	IntentPushToggle    IntentKind = "push_toggle"
 	IntentPushStatus    IntentKind = "push_status"
+	IntentAutoReport    IntentKind = "auto_report"
 	IntentPKGroup       IntentKind = "pk_group"
 	IntentImportDate    IntentKind = "import_date"
 	IntentAddAnchor     IntentKind = "add_anchor"
@@ -116,6 +117,22 @@ func ParseIntent(raw string, now time.Time) Intent {
 			intent.Kind = IntentHelp
 			return intent
 		}
+	}
+
+	// 每日数据自动推送：「开启每日推送 / 接受每日推送」开，「拒绝每日推送 /
+	// 关闭每日推送」关。与「日报推送」（1 点索要提醒）是两个独立开关。
+	// 必须放在通用「推送」判断之前，否则「拒绝每日推送」会被吞掉。
+	if strings.Contains(text, "每日推送") || strings.Contains(text, "自动推送") {
+		switch {
+		case strings.Contains(text, "拒绝") || strings.Contains(text, "关闭") ||
+			strings.Contains(text, "不要") || strings.Contains(text, "取消"):
+			intent.Kind = IntentAutoReport
+			intent.Enable = false
+		default: // 开启 / 接受 / 打开 / 单发「每日推送」都当开启
+			intent.Kind = IntentAutoReport
+			intent.Enable = true
+		}
+		return intent
 	}
 
 	// 日报推送开关

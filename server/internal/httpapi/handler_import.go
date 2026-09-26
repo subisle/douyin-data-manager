@@ -350,6 +350,11 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 		_ = err
 	}
 
+	// 数据更新了：安排自动日报（防抖合并，每个数据日只推一次）
+	if m, ok := s.botManager(); ok {
+		m.ScheduleAutoReport(date)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"batchId":  batchID,
 		"kind":     kind,

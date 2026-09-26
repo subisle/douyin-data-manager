@@ -299,6 +299,30 @@ func (t *Transport) RemindAll(ctx context.Context, text string, opt bot.RemindOp
 	return sent, failed
 }
 
+// PushAll 按 opt 圈定范围逐会话推送消息（文字+图片），每日自动日报用。
+func (t *Transport) PushAll(ctx context.Context, msg bot.Outbound, opt bot.RemindOptions) (sent, failed int) {
+	t.mu.RLock()
+	ids := make([]string, 0, len(t.sessions))
+	for cid, sc := range t.sessions {
+		if (sc.groupId != "" && !opt.Groups) || (sc.groupId == "" && !opt.Private) {
+			continue
+		}
+		ids = append(ids, cid)
+	}
+	t.mu.RUnlock()
+
+	for _, cid := range ids {
+		out := msg
+		out.ConversationID = cid
+		if err := t.Send(ctx, out); err != nil {
+			failed++
+			continue
+		}
+		sent++
+	}
+	return sent, failed
+}
+
 // Send 实现 bot.Transport。文字直发；图片与文件先走 getuploadurl + CDN 上传
 // （与 615 的 weixin-bot-media.js 同款流程），再以 item 发出。
 func (t *Transport) Send(ctx context.Context, out bot.Outbound) error {

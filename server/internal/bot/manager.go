@@ -81,13 +81,16 @@ type ChannelStatus struct {
 type Manager struct {
 	repo *repo.Repo
 
-	mu         sync.RWMutex
-	channels   map[string]*channelState
-	push       bool
-	targets    ReminderTargets
-	log        []LoggedMessage
-	pending    map[string]*pendingImport // 导入日期口令，key 是会话 ID
-	pendingOps map[string]*pendingOp     // 改名/改号对话，key 是会话 ID
+	mu               sync.RWMutex
+	channels         map[string]*channelState
+	push             bool
+	targets          ReminderTargets
+	autoReport       bool
+	autoReportTimers map[string]*time.Timer // 按数据日防抖：最后一笔导入 2 分钟后才推
+	autoReportSent   map[string]bool        // 每个数据日只自动推一次
+	log              []LoggedMessage
+	pending          map[string]*pendingImport // 导入日期口令，key 是会话 ID
+	pendingOps       map[string]*pendingOp     // 改名/改号对话，key 是会话 ID
 }
 
 // ReminderTargets 索要提醒的发送范围：群聊、私聊各自独立开关。
@@ -148,11 +151,13 @@ type pendingImport struct {
 	kinds     map[string]bool
 	remaining int
 	expiresAt time.Time
+	sum       *importSummary // 本次口令会话的累计汇总（多工会多文件合并汇报）
 }
 
 const (
-	pendingImportTTL      = 10 * time.Minute
-	pendingImportMaxFiles = 2
+	pendingImportTTL = 10 * time.Minute
+	// 多工会场景：一个工会的音浪文件各一份，口令要容得下十来个文件
+	pendingImportMaxFiles = 12
 )
 
 type channelState struct {
@@ -181,9 +186,12 @@ func NewManager(r *repo.Repo) *Manager {
 			"weixin": {note: "微信 iLink 适配器待接入"},
 			"qq":     {note: "QQ 开放平台适配器待接入"},
 		},
-		log:     []LoggedMessage{},
-		pending: map[string]*pendingImport{},
-		targets: ReminderTargets{Groups: true, Private: true}, // 缺省全开，与历史行为一致
+		log:              []LoggedMessage{},
+		pending:          map[string]*pendingImport{},
+		targets:          ReminderTargets{Groups: true, Private: true}, // 缺省全开，与历史行为一致
+		autoReport:       true,                                         // 每日数据自动推送缺省开
+		autoReportSent:   map[string]bool{},
+		autoReportTimers: map[string]*time.Timer{},
 	}
 	// 开关持久化在 app_setting：容器天天重启，内存态撑不到凌晨 1 点
 	if r != nil {
@@ -194,6 +202,9 @@ func NewManager(r *repo.Repo) *Manager {
 		}
 		if groups, private, err := r.GetReminderTargets(ctx); err == nil {
 			m.targets = ReminderTargets{Groups: groups, Private: private}
+		}
+		if v, err := r.GetSetting(ctx, "auto_report"); err == nil {
+			m.autoReport = v == "1"
 		}
 	}
 	return m
@@ -305,13 +316,18 @@ func (m *Manager) SetPush(enabled bool) {
 	}
 }
 
-// reminderHour 每天几点自动向活跃会话索要 CSV 文件。
-const reminderHour = 1
+// reminderHour 每天几点自动向活跃会话索要 CSV 文件（凌晨 0 点，数据日是昨天）。
+const reminderHour = 0
 
 // ReminderText 定时/手动索要文件时发的文案。
-// X 日 = 昨天：数据是 T+1 的，1 号凌晨 1 点要的是上月末那天的文件。
+// X 日 = 昨天：数据是 T+1 的，1 号 0 点要的是上月末那天的文件。
 func ReminderText(now time.Time) string {
-	return fmt.Sprintf("请发送%s的音浪文件即可", friendlyDate(now.AddDate(0, 0, -1).Format("2006-01-02")))
+	yesterday := now.AddDate(0, 0, -1)
+	day := fmt.Sprintf("%d日", yesterday.Day())
+	if yesterday.Month() != now.Month() {
+		day = fmt.Sprintf("%d月%d日", int(yesterday.Month()), yesterday.Day())
+	}
+	return fmt.Sprintf("请发送%s音浪数据，支持多个工会数据导入。如果导入错时间，请发送帮助命令获取帮助。", day)
 }
 
 // StartReminderLoop 每天 reminderHour 点向所有活跃会话索要 CSV 文件。
@@ -367,11 +383,23 @@ func (m *Manager) SetReminderTargets(groups, private bool) {
 	}
 }
 
-// Broadcaster 由支持「向所有活跃会话群发」的通道实现。
-// 定义在 bot 包（transport 反过来 import bot，这里不能直接引子包）。
-type Broadcaster interface {
-	// RemindAll 按 opt 圈定的范围群发文本，返回成功/失败条数。
-	RemindAll(ctx context.Context, text string, opt RemindOptions) (sent, failed int)
+// GetAutoReport 每日数据自动推送开关（默认开，可发「拒绝每日推送」关掉）。
+func (m *Manager) GetAutoReport() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.autoReport
+}
+
+// SetAutoReport 切换并持久化每日数据自动推送。
+func (m *Manager) SetAutoReport(enabled bool) {
+	m.mu.Lock()
+	m.autoReport = enabled
+	m.mu.Unlock()
+	if m.repo != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = m.repo.SetSetting(ctx, "auto_report", map[bool]string{true: "1", false: "0"}[enabled])
+	}
 }
 
 // RemindOptions 单次群发的范围。
@@ -383,6 +411,18 @@ type RemindOptions struct {
 // RemindAll 立即向所有有会话上下文的群/用户发一条文本，
 // 返回各通道的发送结果（供网页「立即索要」按钮展示）。
 func (m *Manager) RemindAll(ctx context.Context, text string, opt RemindOptions) []string {
+	msg := Outbound{Text: text}
+	return m.PushToAll(ctx, msg, opt)
+}
+
+// Pusher 由支持「向所有活跃会话推送消息（可带图）」的通道实现。
+type Pusher interface {
+	// PushAll 按 opt 圈定的范围逐会话发送，返回成功/失败条数。
+	PushAll(ctx context.Context, msg Outbound, opt RemindOptions) (sent, failed int)
+}
+
+// PushToAll 向所有活跃会话推送一条消息（文字 + 可选图片），返回各通道结果。
+func (m *Manager) PushToAll(ctx context.Context, msg Outbound, opt RemindOptions) []string {
 	m.mu.RLock()
 	ts := make([]Transport, 0, len(m.channels))
 	for _, st := range m.channels {
@@ -394,11 +434,11 @@ func (m *Manager) RemindAll(ctx context.Context, text string, opt RemindOptions)
 
 	out := make([]string, 0, len(ts))
 	for _, t := range ts {
-		b, ok := t.(Broadcaster)
+		p, ok := t.(Pusher)
 		if !ok {
 			continue
 		}
-		sent, failed := b.RemindAll(ctx, text, opt)
+		sent, failed := p.PushAll(ctx, msg, opt)
 		label := t.Name()
 		switch label {
 		case "weixin":
@@ -408,9 +448,91 @@ func (m *Manager) RemindAll(ctx context.Context, text string, opt RemindOptions)
 		}
 		out = append(out, fmt.Sprintf("%s 成功 %d / 失败 %d", label, sent, failed))
 		m.appendLog(LoggedMessage{At: time.Now(), Channel: t.Name(), Dir: "out",
-			From: "全部会话", Text: text, Intent: "remind"})
+			From: "全部会话", Text: msg.Text, Intent: "auto_report",
+			HasImage: len(msg.Images) > 0})
 	}
 	return out
+}
+
+// ScheduleAutoReport 数据更新后安排自动日报：防抖 2 分钟（音浪+时长两份
+// 只推一次），每个数据日只推一次。开关关着就不安排。
+func (m *Manager) ScheduleAutoReport(date time.Time) {
+	if !m.GetAutoReport() {
+		return
+	}
+	key := date.Format("2006-01-02")
+	m.mu.Lock()
+	if m.autoReportSent == nil {
+		m.autoReportSent = map[string]bool{}
+	}
+	if m.autoReportTimers == nil {
+		m.autoReportTimers = map[string]*time.Timer{}
+	}
+	if t := m.autoReportTimers[key]; t != nil {
+		t.Stop()
+	}
+	m.autoReportTimers[key] = time.AfterFunc(2*time.Minute, func() {
+		m.mu.Lock()
+		delete(m.autoReportTimers, key)
+		already := m.autoReportSent[key]
+		enabled := m.autoReport
+		m.mu.Unlock()
+		if already || !enabled {
+			return
+		}
+		m.PushDailyReport(date)
+		m.mu.Lock()
+		m.autoReportSent[key] = true
+		m.mu.Unlock()
+	})
+	m.mu.Unlock()
+}
+
+// PushDailyReport 把某天的日报（图 + 男女团前三名每日之星）推给对接的会话。
+func (m *Manager) PushDailyReport(date time.Time) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	images, err := m.buildDailyReportImages(ctx, date, "")
+	text := fmt.Sprintf("%s 数据已更新，日报如下：", date.Format("1月2日"))
+	if star := m.dailyStarText(ctx, date); star != "" {
+		text += "\n" + star
+	}
+	if len(images) == 0 && err == nil {
+		text += "\n（暂无榜单数据）"
+	}
+	if err != nil {
+		text += "\n（日报图片生成失败：" + err.Error() + "）"
+	}
+
+	tg := m.GetReminderTargets()
+	opt := RemindOptions{Groups: tg.Groups, Private: tg.Private}
+	res := m.PushToAll(ctx, Outbound{Text: text, Images: images}, opt)
+	m.appendLog(LoggedMessage{At: time.Now(), Channel: "all", Dir: "out",
+		From: "每日推送", Text: text + "\n（" + strings.Join(res, "；") + "）",
+		Intent: "auto_report", HasImage: len(images) > 0})
+}
+
+// dailyStarText 男女团各前三名（按当日音浪）。
+func (m *Manager) dailyStarText(ctx context.Context, date time.Time) string {
+	var b strings.Builder
+	medals := []string{"🥇", "🥈", "🥉"}
+	for _, g := range []struct{ label, gender string }{{"女团", "female"}, {"男团", "male"}} {
+		rows, err := m.repo.ListDailyByDate(ctx, date, domain.Gender(g.gender))
+		if err != nil || len(rows) == 0 {
+			continue
+		}
+		top := rows
+		if len(top) > 3 {
+			top = top[:3]
+		}
+		items := make([]string, 0, len(top))
+		for i, r := range top {
+			items = append(items, fmt.Sprintf("%s%s %s", medals[i], r.Name, render.FormatWave(r.Wave)))
+		}
+		fmt.Fprintf(&b, "%s每日之星：%s\n", g.label, strings.Join(items, "、"))
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // RecentMessages 返回最近的消息（新的在前）。
@@ -444,18 +566,29 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 	now := time.Now()
 
 	// 有文件附件：CSV 导入流程优先于文字意图（615 同款顺序）。
+	// 一条消息可以带多个附件（多工会各发一个文件），逐个导入，汇报拼在一起。
 	if len(in.Attachments) > 0 {
-		out, err := m.handleInboundFile(ctx, in, now)
+		texts := make([]string, 0, len(in.Attachments))
 		intent := "import_csv"
-		if err != nil {
-			// 出错也必须回复：用户发了文件石沉大海比报错更糟。
-			// 细节进日志，回复给一句人话。
-			intent = "import_error"
-			out.Text = "处理失败：" + err.Error()
+		for i := range in.Attachments {
+			one := in
+			one.Attachments = in.Attachments[i : i+1]
+			out, err := m.handleInboundFile(ctx, one, now)
+			if err != nil {
+				// 出错也必须回复：文件石沉大海比报错更糟
+				intent = "import_error"
+				texts = append(texts, fmt.Sprintf("第 %d 个文件处理失败：%s", i+1, err.Error()))
+				continue
+			}
+			if len(in.Attachments) > 1 {
+				out.Text = fmt.Sprintf("【第 %d 个文件】%s", i+1, out.Text)
+			}
+			texts = append(texts, out.Text)
 		}
+		out := Outbound{ConversationID: in.ConversationID, Text: strings.Join(texts, "\n———\n")}
 		m.appendLog(LoggedMessage{
 			At: now, Channel: in.Channel, Dir: "in",
-			From: in.SenderID, Text: strings.TrimSpace(in.Text + " [文件]"), Intent: intent,
+			From: in.SenderID, Text: strings.TrimSpace(in.Text + fmt.Sprintf(" [文件×%d]", len(in.Attachments))), Intent: intent,
 		})
 		m.appendLog(LoggedMessage{
 			At: time.Now(), Channel: in.Channel, Dir: "out",
@@ -610,6 +743,14 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 			out.Text = "每日 1 点索要 CSV：已关闭"
 		}
 
+	case IntentAutoReport:
+		m.SetAutoReport(intent.Enable)
+		if intent.Enable {
+			out.Text = "已开启每日数据推送：数据更新后自动发日报与男女团每日之星"
+		} else {
+			out.Text = "已拒绝每日数据推送；想再开启就发「开启每日推送」"
+		}
+
 	default:
 		out.Text = "没听懂。发「帮助」看指令。"
 	}
@@ -741,6 +882,7 @@ func HelpText() string {
 		"· 改名 —— 发抖音号，再回复新名字",
 		"· 改号 —— 发姓名（多个号会让你挑），再回复新抖音号",
 		"· 开启/关闭日报推送 —— 每天 1 点自动索要 CSV 的提醒开关",
+		"· 开启每日推送 / 拒绝每日推送 —— 数据更新后自动发日报与男女团每日之星",
 		"· 帮助 —— 本菜单",
 	}, "\n")
 }

@@ -314,6 +314,30 @@ func (t *Transport) RemindAll(ctx context.Context, text string, opt bot.RemindOp
 	return sent, failed
 }
 
+// PushAll 按 opt 圈定范围逐会话推送消息（文字+图片），每日自动日报用。
+func (t *Transport) PushAll(ctx context.Context, msg bot.Outbound, opt bot.RemindOptions) (sent, failed int) {
+	t.mu.RLock()
+	ids := make([]string, 0, len(t.sessions))
+	for cid, sc := range t.sessions {
+		if (sc.groupOpenID != "" && !opt.Groups) || (sc.groupOpenID == "" && !opt.Private) {
+			continue
+		}
+		ids = append(ids, cid)
+	}
+	t.mu.RUnlock()
+
+	for _, cid := range ids {
+		out := msg
+		out.ConversationID = cid
+		if err := t.Send(ctx, out); err != nil {
+			failed++
+			continue
+		}
+		sent++
+	}
+	return sent, failed
+}
+
 // getDispatcher 取异步派发器。Start 之前收到消息（理论上不该发生）就同步跑，
 // 别让消息凭空消失。
 func (t *Transport) getDispatcher() *bot.Dispatcher {

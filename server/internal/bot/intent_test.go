@@ -82,6 +82,36 @@ func TestPushToggleEnable(t *testing.T) {
 	}
 }
 
+// 每日数据自动推送是独立于「日报推送」（1 点索要）的开关，
+// 「拒绝每日推送」这种说法不能被通用推送判断吞掉。
+func TestAutoReportToggle(t *testing.T) {
+	now := time.Now()
+	cases := []struct {
+		in     string
+		kind   IntentKind
+		enable bool
+	}{
+		{"开启每日推送", IntentAutoReport, true},
+		{"接受每日推送", IntentAutoReport, true},
+		{"拒绝每日推送", IntentAutoReport, false},
+		{"关闭每日推送", IntentAutoReport, false},
+		{"不要自动推送", IntentAutoReport, false},
+		{"每日推送", IntentAutoReport, true},
+		// 不含「每日/自动推送」的照旧走 1 点索要开关
+		{"开启日报推送", IntentPushToggle, true},
+	}
+	for _, c := range cases {
+		got := ParseIntent(c.in, now)
+		if got.Kind != c.kind {
+			t.Errorf("ParseIntent(%q).Kind = %s, 期望 %s", c.in, got.Kind, c.kind)
+			continue
+		}
+		if got.Enable != c.enable {
+			t.Errorf("ParseIntent(%q).Enable = %v, 期望 %v", c.in, got.Enable, c.enable)
+		}
+	}
+}
+
 func TestNormalizeText(t *testing.T) {
 	if got := NormalizeText("  日报。  "); got != "日报" {
 		t.Errorf("NormalizeText = %q", got)
