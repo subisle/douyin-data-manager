@@ -334,31 +334,47 @@ func (r *Repo) upsertYearlyMetrics(ctx context.Context, rows []domain.YearlyMetr
 	return nil
 }
 
-// ListDailyByDate 取某天全团日榜，JOIN 出姓名与性别，供导出直接渲染。
+// ListDailyByDate 取某天日报全量行，JOIN 出姓名与性别，供导出直接渲染。
 // cumulative_wave 不取快照原值，而是**当月 1 号至该日的日音浪总和**
 // （按人汇总全部账号）——日报「累计总音浪」列对齐 615 的月累计口径：
 // 运营说的「总音浪」= 1 号到数据日的累计，不是当日快照值。
+//
+// 2026-09-27 起**以月榜名册为基准**（monthly_metric LEFT JOIN 当日
+// daily_metric）：当天没快照的主播也出现（wave=0 / 未开播）——
+// 否则日报图只有当天有数据的 63 人、月榜 CSV 是全月 91 人，
+// 运营对不上数。月里完全没数据的人两边都不出现（同口径）。
 func (r *Repo) ListDailyByDate(ctx context.Context, date time.Time, gender domain.Gender) ([]domain.DailyMetric, error) {
-	query := `SELECT d.id, d.person_id, d.anchor_id, d.biz_date, d.wave,
+	query := `SELECT COALESCE(d.id, 0) AS id, p.id AS person_id,
+	                 COALESCE(d.anchor_id, '') AS anchor_id,
+	                 DATE(?) AS biz_date,
+	                 COALESCE(d.wave, 0) AS wave,
 	                 (SELECT COALESCE(SUM(d2.wave), 0) FROM daily_metric d2
-	                   WHERE d2.person_id = d.person_id
+	                   WHERE d2.person_id = p.id
 	                     AND d2.biz_date >= DATE_FORMAT(?, '%Y-%m-01') AND d2.biz_date <= ?) AS cumulative_wave,
-	                 d.prev_snapshot_date, d.wave_span, d.wave_reliable, d.minutes,
-	                 d.cumulative_minutes, d.minutes_span, d.minutes_reliable, d.is_live, d.tier,
+	                 d.prev_snapshot_date,
+	                 COALESCE(d.wave_span, 1) AS wave_span,
+	                 COALESCE(d.wave_reliable, 1) AS wave_reliable,
+	                 COALESCE(d.minutes, 0) AS minutes,
+	                 COALESCE(d.cumulative_minutes, 0) AS cumulative_minutes,
+	                 COALESCE(d.minutes_span, 1) AS minutes_span,
+	                 COALESCE(d.minutes_reliable, 1) AS minutes_reliable,
+	                 COALESCE(d.is_live, 0) AS is_live,
+	                 d.tier,
 	                 p.name AS name, p.gender AS gender, m.name AS master_name
-	          FROM daily_metric d
-	          JOIN person p ON p.id = d.person_id
+	          FROM monthly_metric mm
+	          JOIN person p ON p.id = mm.person_id
+	          LEFT JOIN daily_metric d ON d.person_id = p.id AND d.biz_date = ?
 	          LEFT JOIN person m ON m.id = p.master_id
-	          WHERE d.biz_date = ? AND p.deleted_at IS NULL AND p.status = 'active'
+	          WHERE mm.period = DATE_FORMAT(?, '%Y-%m') AND p.deleted_at IS NULL AND p.status = 'active'
 	            AND p.hide_in_daily_report = 0`
-	args := []any{date, date, date}
+	args := []any{date, date, date, date, date}
 
 	if gender != "" {
 		query += " AND p.gender = ?"
 		args = append(args, string(gender))
 	}
 	// 排名按累计总音浪（当月 1 号至数据日的累加），其次当日音浪。
-	query += " ORDER BY cumulative_wave DESC, d.wave DESC, p.name ASC"
+	query += " ORDER BY cumulative_wave DESC, wave DESC, p.name ASC"
 
 	var out []domain.DailyMetric
 	if err := r.db.SelectContext(ctx, &out, query, args...); err != nil {
