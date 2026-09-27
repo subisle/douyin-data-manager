@@ -313,10 +313,13 @@ func (r Report) summary() (totalCount, notLiveCount, notLiveDays int) {
 }
 
 func (r Report) title(style Style) string {
-	// 2026-09-27：运营要求报告里不带公会名（原女队「薇笑传媒」/男团「星嗨艺创」），
-	// 全部人放一张图、只分男女。外部传 title 仍可覆盖。
+	// 2026-09-27：报告标题不带公会名。男团（原「星嗨艺创」）按运营要求改为「ST-001」，
+	// 女队用中性标题；外部传 title 仍可覆盖。
 	if strings.TrimSpace(r.Title) != "" {
 		return strings.TrimSpace(r.Title)
+	}
+	if r.Gender == "male" {
+		return "ST-001"
 	}
 	return "主播数据统计"
 }
