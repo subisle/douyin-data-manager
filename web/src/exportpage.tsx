@@ -4,12 +4,6 @@ import type { NavParams } from "./nav";
 
 // 2026-09-27：不再分页——全部人进一张图，只分男女（后端 /exports/report.svg 缺省即全量）。
 
-const todayLocal = () => {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-};
-
 // 数据 T+1：能看到的最新一天是昨天
 const dataDayLocal = () => {
   const d = new Date();
@@ -83,6 +77,39 @@ export function ExportPage({ params }: { params?: NavParams }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // 自定义日报图标题（男女各一个），存后端 app_setting，机器人与导出共用
+  const DEFAULT_TITLES = { male: "ST-001", female: "主播数据统计" };
+  const [titleMale, setTitleMale] = useState("");
+  const [titleFemale, setTitleFemale] = useState("");
+  const [titleSaved, setTitleSaved] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/v1/exports/report-titles")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`后端返回 ${r.status}`))))
+      .then((d: { male?: string; female?: string }) => {
+        setTitleMale(d.male ?? "");
+        setTitleFemale(d.female ?? "");
+      })
+      .catch(() => {/* 读不到就用默认，不阻塞页面 */});
+  }, []);
+
+  const saveTitles = async () => {
+    setErr("");
+    try {
+      const res = await fetch("/api/v1/exports/report-titles", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ male: titleMale.trim(), female: titleFemale.trim() }),
+      });
+      if (!res.ok) throw new Error(`保存失败：后端返回 ${res.status}`);
+      setTitleSaved(true);
+      setTimeout(() => setTitleSaved(false), 2000);
+      void load();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+
   const toggleCol = (key: string) => {
     setVisible((v) => {
       const next = v.includes(key) ? v.filter((k) => k !== key) : [...v, key];
@@ -103,6 +130,10 @@ export function ExportPage({ params }: { params?: NavParams }) {
         // 列顺序按 615 的固定顺序输出，勾选只决定去留；缺省不分页
         cols: ALL_COLUMNS.filter((c) => visible.includes(c.key)).map((c) => c.key).join(","),
       });
+      // 预览即时生效：输入框有值就显式传 title（后端显式传参优先级最高），
+      // 空则交给后端用已保存的设置
+      const t = (g === "male" ? titleMale : titleFemale).trim();
+      if (t) usp.set("title", t);
       const res = await fetch(`/api/v1/exports/report.svg?${usp}`);
       if (!res.ok) throw new Error(`后端返回 ${res.status}`);
       setSvg(await res.text());
@@ -188,6 +219,31 @@ export function ExportPage({ params }: { params?: NavParams }) {
             {c.label}
           </label>
         ))}
+      </div>
+
+      <div className="toolbar" style={{ flexWrap: "wrap" }}>
+        <span className="tiny muted">日报图标题：</span>
+        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          男团
+          <input
+            value={titleMale}
+            placeholder={DEFAULT_TITLES.male}
+            onChange={(e) => setTitleMale(e.target.value)}
+            style={{ width: 140 }}
+          />
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          女队
+          <input
+            value={titleFemale}
+            placeholder={DEFAULT_TITLES.female}
+            onChange={(e) => setTitleFemale(e.target.value)}
+            style={{ width: 140 }}
+          />
+        </label>
+        <button onClick={() => void saveTitles()}>保存标题</button>
+        {titleSaved && <span className="tiny muted">已保存，机器人发图同步生效</span>}
+        <span className="tiny muted">留空 = 恢复默认</span>
       </div>
 
       <div className="toolbar">

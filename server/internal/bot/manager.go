@@ -813,7 +813,9 @@ func (m *Manager) buildDailyReportImages(ctx context.Context, date time.Time, ge
 		}
 
 		report := render.Report{
-			Date: date.Format("2006-01-02"), Gender: g,
+			// 标题用管理页保存的自定义值；空 = render 内置默认（男 ST-001 / 女 主播数据统计）
+			Title: m.repo.GetReportTitle(ctx, g),
+			Date:  date.Format("2006-01-02"), Gender: g,
 			Rows: all, Stats: all,
 			Columns:   render.DefaultColumns(),
 			PageIndex: 1, PageCount: 1,

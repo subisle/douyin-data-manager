@@ -68,6 +68,10 @@ func New(r *repo.Repo, b *bot.Manager, cfg config.Config, log *slog.Logger) *Ser
 	// 导出图片（SVG，样式对齐 615）
 	s.mux.HandleFunc("GET /api/v1/exports/report.svg", s.exportReport)
 
+	// 日报图标题（男女各一个，存 app_setting；机器人与手动导出共用）
+	s.mux.HandleFunc("GET /api/v1/exports/report-titles", s.getReportTitles)
+	s.mux.HandleFunc("PUT /api/v1/exports/report-titles", s.putReportTitles)
+
 	// 机器人：双通道状态、启停、推送开关、意图试玩
 	s.mux.HandleFunc("GET /api/v1/bots/status", s.botStatus)
 	s.mux.HandleFunc("POST /api/v1/bots/{name}/start", s.botStart)

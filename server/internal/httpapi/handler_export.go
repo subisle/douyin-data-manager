@@ -130,8 +130,15 @@ func (s *Server) exportReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 标题优先级：query title 显式传参 > 已保存的自定义标题 > render 内置默认。
+	// 保存的设置在 app_setting（report_title_male / report_title_female）。
+	title := strings.TrimSpace(r.URL.Query().Get("title"))
+	if title == "" {
+		title = s.repo.GetReportTitle(r.Context(), string(gender))
+	}
+
 	report := render.Report{
-		Title:              strings.TrimSpace(r.URL.Query().Get("title")),
+		Title:              title,
 		Date:               date.Format(isoDate),
 		Gender:             string(gender),
 		Rows:               pageRows,

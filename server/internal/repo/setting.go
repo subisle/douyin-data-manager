@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,46 @@ const keyPushEnabled = "push_enabled"
 const keyRemindGroup = "remind_group"
 const keyRemindPrivate = "remind_private"
 const keyDataUpdatedAt = "data_updated_at"
+
+// 日报图标题（男女各一个）。空值 = 用 render 包的内置默认。
+// 存自定义标题而不是生效值，改默认样式时不用迁移数据。
+const keyReportTitleMale = "report_title_male"
+const keyReportTitleFemale = "report_title_female"
+
+// GetReportTitle 读某个性别的自定义日报图标题；未设置返回空串。
+func (r *Repo) GetReportTitle(ctx context.Context, gender string) string {
+	key := keyReportTitleMale
+	if gender == "female" {
+		key = keyReportTitleFemale
+	}
+	v, err := r.GetSetting(ctx, key)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(v)
+}
+
+// SetReportTitle 保存某个性别的日报图标题；空串 = 恢复默认。
+func (r *Repo) SetReportTitle(ctx context.Context, gender, title string) error {
+	key := keyReportTitleMale
+	if gender == "female" {
+		key = keyReportTitleFemale
+	}
+	return r.SetSetting(ctx, key, strings.TrimSpace(title))
+}
+
+// ReportTitles 男/女两个自定义标题（管理页回显用）。
+type ReportTitles struct {
+	Male   string `json:"male"`
+	Female string `json:"female"`
+}
+
+func (r *Repo) GetReportTitles(ctx context.Context) ReportTitles {
+	return ReportTitles{
+		Male:   r.GetReportTitle(ctx, "male"),
+		Female: r.GetReportTitle(ctx, "female"),
+	}
+}
 
 // GetSetting 读取设置；不存在返回 ErrNotFound。
 func (r *Repo) GetSetting(ctx context.Context, key string) (string, error) {
