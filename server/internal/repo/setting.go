@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // 应用级 KV 设置（app_setting 表）。只放需要跨重启持久化的开关，
@@ -12,6 +13,7 @@ import (
 const keyPushEnabled = "push_enabled"
 const keyRemindGroup = "remind_group"
 const keyRemindPrivate = "remind_private"
+const keyDataUpdatedAt = "data_updated_at"
 
 // GetSetting 读取设置；不存在返回 ErrNotFound。
 func (r *Repo) GetSetting(ctx context.Context, key string) (string, error) {
@@ -34,6 +36,14 @@ func (r *Repo) SetSetting(ctx context.Context, key, value string) error {
 		return fmt.Errorf("写入设置 %s: %w", key, err)
 	}
 	return nil
+}
+
+// MarkDataUpdated 记一笔「业务数据已更新」的时间戳（尽力而为，失败不阻塞业务）。
+// 盒子上的 /srv/douyin/sync-to-sqlpub.sh（每分钟 cron）比对它与上次已同步值，
+// 有变化就把 Go 业务表推到公网备份库（mysql7.sqlpub.com）。
+// 所有会改动业务数据的路径都要调：指标重算、导入、主播/账号资料修改。
+func (r *Repo) MarkDataUpdated(ctx context.Context) {
+	_ = r.SetSetting(ctx, keyDataUpdatedAt, time.Now().Format(time.RFC3339))
 }
 
 // GetPushEnabled 读推送开关，缺省关闭。启动时装载一次。

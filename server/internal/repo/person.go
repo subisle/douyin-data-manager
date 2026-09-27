@@ -128,6 +128,7 @@ func (r *Repo) CreatePerson(ctx context.Context, p *domain.Person) error {
 		return fmt.Errorf("读取新主播 ID: %w", err)
 	}
 	p.ID = uint64(id)
+	r.MarkDataUpdated(ctx)
 	return nil
 }
 
@@ -145,7 +146,11 @@ func (r *Repo) UpdatePerson(ctx context.Context, p *domain.Person) error {
 	if err != nil {
 		return fmt.Errorf("更新主播: %w", err)
 	}
-	return ensureAffected(res, "更新主播")
+	if err := ensureAffected(res, "更新主播"); err != nil {
+		return err
+	}
+	r.MarkDataUpdated(ctx)
+	return nil
 }
 
 // SoftDeletePerson 软删除。历史数据必须保留，硬删会毁掉月榜和年榜。
@@ -155,7 +160,11 @@ func (r *Repo) SoftDeletePerson(ctx context.Context, id uint64) error {
 	if err != nil {
 		return fmt.Errorf("删除主播: %w", err)
 	}
-	return ensureAffected(res, "删除主播")
+	if err := ensureAffected(res, "删除主播"); err != nil {
+		return err
+	}
+	r.MarkDataUpdated(ctx)
+	return nil
 }
 
 // FindAccountByDouyinNo 按抖音号找账号（anchor_id 或 douyin_no 任一命中）。
@@ -180,7 +189,11 @@ func (r *Repo) UpdateAccountIDs(ctx context.Context, accountID uint64, newAnchor
 	if err != nil {
 		return fmt.Errorf("更新账号: %w", err)
 	}
-	return ensureAffected(res, "更新账号")
+	if err := ensureAffected(res, "更新账号"); err != nil {
+		return err
+	}
+	r.MarkDataUpdated(ctx)
+	return nil
 }
 
 // RenamePerson 改主播姓名（改名流程）。历史数据引用 person.id，改名安全。
@@ -190,7 +203,11 @@ func (r *Repo) RenamePerson(ctx context.Context, personID uint64, newName string
 	if err != nil {
 		return fmt.Errorf("改名: %w", err)
 	}
-	return ensureAffected(res, "改名")
+	if err := ensureAffected(res, "改名"); err != nil {
+		return err
+	}
+	r.MarkDataUpdated(ctx)
+	return nil
 }
 
 // ListAccounts 返回某主播绑定的全部抖音账号。
@@ -232,6 +249,7 @@ func (r *Repo) BindAccount(ctx context.Context, a *domain.Account) error {
 			return fmt.Errorf("重算回填后的历史指标: %w", err)
 		}
 	}
+	r.MarkDataUpdated(ctx)
 	return nil
 }
 

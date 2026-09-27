@@ -196,6 +196,9 @@ func (r *Repo) RecomputePerson(ctx context.Context, personID uint64, from, to ti
 			return err
 		}
 	}
+
+	// 指标变了 = 数据更新了：打同步标记（公网备份库的 cron 靠它判断要不要推）
+	r.MarkDataUpdated(ctx)
 	return nil
 }
 

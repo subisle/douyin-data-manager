@@ -26,6 +26,9 @@ func (r *Repo) BatchDeletePersons(ctx context.Context, ids []uint64) (int, error
 	if err != nil {
 		return 0, fmt.Errorf("读取影响行数: %w", err)
 	}
+	if n > 0 {
+		r.MarkDataUpdated(ctx)
+	}
 	return int(n), nil
 }
 
@@ -114,6 +117,7 @@ func (r *Repo) MergePersons(ctx context.Context, primaryID, secondaryID uint64, 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("提交合并: %w", err)
 	}
+	r.MarkDataUpdated(ctx)
 	return nil
 }
 
@@ -127,7 +131,11 @@ func (r *Repo) SetMaster(ctx context.Context, personID uint64, masterID *uint64)
 	if err != nil {
 		return fmt.Errorf("设置师傅: %w", err)
 	}
-	return ensureAffected(res, "设置师傅")
+	if err := ensureAffected(res, "设置师傅"); err != nil {
+		return err
+	}
+	r.MarkDataUpdated(ctx)
+	return nil
 }
 
 // SaveDailySnapshot 直接写某主播某天的快照（主播管理页的"编辑音浪/时长"用）。
