@@ -72,6 +72,10 @@ func New(r *repo.Repo, b *bot.Manager, cfg config.Config, log *slog.Logger) *Ser
 	s.mux.HandleFunc("GET /api/v1/exports/report-titles", s.getReportTitles)
 	s.mux.HandleFunc("PUT /api/v1/exports/report-titles", s.putReportTitles)
 
+	// 日报图列勾选（导出页勾选自动保存，机器人发图同步生效）
+	s.mux.HandleFunc("GET /api/v1/exports/report-columns", s.getReportColumns)
+	s.mux.HandleFunc("PUT /api/v1/exports/report-columns", s.putReportColumns)
+
 	// 机器人：双通道状态、启停、推送开关、意图试玩
 	s.mux.HandleFunc("GET /api/v1/bots/status", s.botStatus)
 	s.mux.HandleFunc("POST /api/v1/bots/{name}/start", s.botStart)

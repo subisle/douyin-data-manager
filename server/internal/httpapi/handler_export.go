@@ -111,6 +111,11 @@ func (s *Server) exportReport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cols = set
+	} else if saved := s.repo.GetReportColumns(r.Context()); saved != "" {
+		// 未显式传 cols 时用导出页保存的勾选（与机器人发图同一份）
+		if set, err := render.ParseColumnSet(saved); err == nil {
+			cols = set
+		}
 	} else {
 		if r.URL.Query().Get("duration") == "1" {
 			cols.Duration = true

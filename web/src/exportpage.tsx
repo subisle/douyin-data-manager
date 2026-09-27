@@ -91,6 +91,15 @@ export function ExportPage({ params }: { params?: NavParams }) {
         setTitleFemale(d.female ?? "");
       })
       .catch(() => {/* 读不到就用默认，不阻塞页面 */});
+    // 列勾选也是共享设置：进页面回显已保存的勾选
+    fetch("/api/v1/exports/report-columns")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`后端返回 ${r.status}`))))
+      .then((d: { columns?: string }) => {
+        if (!d.columns) return;
+        const keys = d.columns.split(",").map((s) => s.trim()).filter(Boolean);
+        if (keys.length) setVisible(keys);
+      })
+      .catch(() => {/* 读不到就用默认列 */});
   }, []);
 
   const saveTitles = async () => {
@@ -113,7 +122,16 @@ export function ExportPage({ params }: { params?: NavParams }) {
   const toggleCol = (key: string) => {
     setVisible((v) => {
       const next = v.includes(key) ? v.filter((k) => k !== key) : [...v, key];
-      return next.length ? next : v; // 至少保留一列
+      if (next.length === 0 || next.length === v.length) return v; // 至少保留一列 / 无变化不保存
+      // 勾选即保存：机器人发图与手动导出共用这一份（后端 report_columns）
+      void fetch("/api/v1/exports/report-columns", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          columns: ALL_COLUMNS.filter((c) => next.includes(c.key)).map((c) => c.key).join(","),
+        }),
+      }).catch(() => {/* 保存失败不阻塞预览，下次勾选会再存 */});
+      return next;
     });
   };
 
@@ -219,6 +237,7 @@ export function ExportPage({ params }: { params?: NavParams }) {
             {c.label}
           </label>
         ))}
+        <span className="tiny muted">勾选自动保存，机器人发图同步生效</span>
       </div>
 
       <div className="toolbar" style={{ flexWrap: "wrap" }}>

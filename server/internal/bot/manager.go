@@ -777,13 +777,26 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 	return out, nil
 }
 
+// maxRowsPerPage 单张日报图最多行数。超过就对半拆两张（页码「（1/2）」），
+// 男团 90+ 人挤一张字太小，运营看不清。
+const maxRowsPerPage = 60
+
 // buildDailyReportImages 生成日报图（男女各一张分开推送）：女团一张
 // （经典样式），男团一张（苹果样式，全量行数不分页，版式高度自适应）。
 // 某个团当天没数据就不占图；指定性别只出该团。
+// 人数超过 maxRowsPerPage 时该团对半拆成两张图（列勾选与导出页共用一份设置）。
 func (m *Manager) buildDailyReportImages(ctx context.Context, date time.Time, gender string) ([]OutboundImage, error) {
 	genders := []string{"female", "male"}
 	if gender == "female" || gender == "male" {
 		genders = []string{gender}
+	}
+
+	// 列勾选与手动导出共用（导出页勾选自动保存）。空 = 默认五列。
+	columns := render.DefaultColumns()
+	if raw := m.repo.GetReportColumns(ctx); raw != "" {
+		if set, err := render.ParseColumnSet(raw); err == nil {
+			columns = set
+		}
 	}
 
 	images := make([]OutboundImage, 0, 2)
@@ -812,22 +825,34 @@ func (m *Manager) buildDailyReportImages(ctx context.Context, date time.Time, ge
 			})
 		}
 
-		report := render.Report{
-			// 标题用管理页保存的自定义值；空 = render 内置默认（男 ST-001 / 女 主播数据统计）
-			Title: m.repo.GetReportTitle(ctx, g),
-			Date:  date.Format("2006-01-02"), Gender: g,
-			Rows: all, Stats: all,
-			Columns:   render.DefaultColumns(),
-			PageIndex: 1, PageCount: 1,
-			PageSize: len(all),
-			ShowInactiveFooter: true,
+		// 拆页：每张 ceil(n/2) 行，全局排名连续（rankBase 按 PageSize 偏移）。
+		pages := [][]render.Row{all}
+		if len(all) > maxRowsPerPage {
+			half := (len(all) + 1) / 2
+			pages = [][]render.Row{all[:half], all[half:]}
 		}
-		png, err := render.RenderPNG(report, render.ResolveStyle(g, ""))
-		if err != nil {
-			return nil, fmt.Errorf("生成日报图片失败: %w", err)
+
+		for i, pageRows := range pages {
+			report := render.Report{
+				// 标题用管理页保存的自定义值；空 = render 内置默认（男 ST-001 / 女 主播数据统计）
+				Title: m.repo.GetReportTitle(ctx, g),
+				Date:  date.Format("2006-01-02"), Gender: g,
+				Rows: pageRows, Stats: all,
+				Columns:   columns,
+				PageIndex: i + 1, PageCount: len(pages),
+				PageSize: len(pages[0]),
+				ShowInactiveFooter: i+1 == len(pages), // 与导出一致：未播页脚只在最后一张
+			}
+			png, err := render.RenderPNG(report, render.ResolveStyle(g, ""))
+			if err != nil {
+				return nil, fmt.Errorf("生成日报图片失败: %w", err)
+			}
+			name := fmt.Sprintf("日报-%s-%s", date.Format("2006-01-02"), genderLabel(g))
+			if len(pages) > 1 {
+				name = fmt.Sprintf("%s-%d", name, i+1)
+			}
+			images = append(images, OutboundImage{Data: png, Name: name + ".png"})
 		}
-		name := fmt.Sprintf("日报-%s-%s", date.Format("2006-01-02"), genderLabel(g))
-		images = append(images, OutboundImage{Data: png, Name: name + ".png"})
 	}
 	return images, nil
 }

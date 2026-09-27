@@ -21,6 +21,24 @@ const keyDataUpdatedAt = "data_updated_at"
 const keyReportTitleMale = "report_title_male"
 const keyReportTitleFemale = "report_title_female"
 
+// 日报图列勾选（逗号分隔，615 列键）。空值 = 默认五列。
+// 导出页勾选后自动保存，机器人发图与手动导出共用同一份。
+const keyReportColumns = "report_columns"
+
+// GetReportColumns 读保存的列勾选串；未设置返回空串。
+func (r *Repo) GetReportColumns(ctx context.Context) string {
+	v, err := r.GetSetting(ctx, keyReportColumns)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(v)
+}
+
+// SetReportColumns 保存列勾选串（空串 = 恢复默认列）。
+func (r *Repo) SetReportColumns(ctx context.Context, raw string) error {
+	return r.SetSetting(ctx, keyReportColumns, strings.TrimSpace(raw))
+}
+
 // GetReportTitle 读某个性别的自定义日报图标题；未设置返回空串。
 func (r *Repo) GetReportTitle(ctx context.Context, gender string) string {
 	key := keyReportTitleMale

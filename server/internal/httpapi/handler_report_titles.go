@@ -3,6 +3,8 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+
+	"douyin-server/internal/render"
 )
 
 // getReportTitles GET /api/v1/exports/report-titles
@@ -40,4 +42,34 @@ func (s *Server) putReportTitles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, s.repo.GetReportTitles(r.Context()))
+}
+
+// getReportColumns GET /api/v1/exports/report-columns
+// 返回保存的日报图列勾选（逗号分隔的 615 列键）；空 = 默认五列。
+func (s *Server) getReportColumns(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"columns": s.repo.GetReportColumns(r.Context())})
+}
+
+// putReportColumns PUT /api/v1/exports/report-columns
+// 请求体 {"columns":"rank,name,dailyWave,totalWave"}；空串 = 恢复默认列。
+// 列键合法性在这里先验一遍，坏值不落库。
+func (s *Server) putReportColumns(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Columns string `json:"columns"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "请求体不是合法 JSON")
+		return
+	}
+	if req.Columns != "" {
+		if _, err := render.ParseColumnSet(req.Columns); err != nil {
+			badRequest(w, err.Error())
+			return
+		}
+	}
+	if err := s.repo.SetReportColumns(r.Context(), req.Columns); err != nil {
+		internalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"columns": s.repo.GetReportColumns(r.Context())})
 }
