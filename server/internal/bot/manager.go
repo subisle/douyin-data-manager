@@ -698,7 +698,7 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 			break
 		}
 		out.Images = images
-		out.Text = fmt.Sprintf("%s 日榜", date.Format("1月2日"))
+		out.Text = fmt.Sprintf("%s 日榜（%d 张）", date.Format("1月2日"), len(images))
 
 	case IntentMonthlyReport:
 		period := intent.Period
@@ -763,24 +763,23 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 	return out, nil
 }
 
-// buildDailyReportImages 生成日报图（两个工会合并成单张）：女团（经典样式）
-// 与男团（苹果样式）各自渲染后纵向拼接成一张长图发送，群里只占一条图片消息。
-// 某个团当天没数据就跳过；只有一个团有数据时直接用该团渲染结果，不拼接。
-// 男团不再按行分页：合并后分页没有意义，版式高度自适应行数。
+// buildDailyReportImages 生成日报图（男女各一张分开推送）：女团一张
+// （经典样式），男团一张（苹果样式，全量行数不分页，版式高度自适应）。
+// 某个团当天没数据就不占图；指定性别只出该团。
 func (m *Manager) buildDailyReportImages(ctx context.Context, date time.Time, gender string) ([]OutboundImage, error) {
 	genders := []string{"female", "male"}
 	if gender == "female" || gender == "male" {
 		genders = []string{gender}
 	}
 
-	parts := make([][]byte, 0, 2)
+	images := make([]OutboundImage, 0, 2)
 	for _, g := range genders {
 		rows, err := m.repo.ListDailyByDate(ctx, date, domain.Gender(g))
 		if err != nil {
 			return nil, err
 		}
 		if len(rows) == 0 {
-			continue // 这个团当天没数据就不画这段
+			continue // 这个团当天没数据就不占一张图
 		}
 
 		all := make([]render.Row, 0, len(rows))
@@ -811,24 +810,17 @@ func (m *Manager) buildDailyReportImages(ctx context.Context, date time.Time, ge
 		if err != nil {
 			return nil, fmt.Errorf("生成日报图片失败: %w", err)
 		}
-		parts = append(parts, png)
+		name := fmt.Sprintf("日报-%s-%s", date.Format("2006-01-02"), genderLabel(g))
+		images = append(images, OutboundImage{Data: png, Name: name + ".png"})
 	}
+	return images, nil
+}
 
-	if len(parts) == 0 {
-		return nil, nil
+func genderLabel(g string) string {
+	if g == "female" {
+		return "女团"
 	}
-	var data []byte
-	if len(parts) == 1 {
-		data = parts[0]
-	} else {
-		merged, err := render.ConcatVerticalPNG(parts...)
-		if err != nil {
-			return nil, fmt.Errorf("合并日报图片失败: %w", err)
-		}
-		data = merged
-	}
-	name := fmt.Sprintf("日报-%s", date.Format("2006-01-02"))
-	return []OutboundImage{{Data: data, Name: name + ".png"}}, nil
+	return "男团"
 }
 
 func sumWave(rows []domain.MonthlyMetric) string {
