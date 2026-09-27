@@ -17,8 +17,10 @@ const dateLayout = "2006-01-02"
 // 为什么敢物化：单人一年的快照不到 1000 行，全量重算只要几毫秒。
 // 物化表脏了随时能重建，不用担心"物化视图对不上"这种慢性病。
 //
-// from/to 控制**写回**范围，但差分仍从该账号的第一条快照开始算，
-// 否则区间起点那天的日音浪会因为没有基线而被误记成 0。
+// from/to 只影响调用方意图（导入路径传单日、清理路径传整年），
+// 实际计算永远基于该主播**全部**快照：日/月指标必须整月聚合，
+// 否则导入路径的单日窗口会把月榜覆盖成"最后一天的日值"
+// （2026-09 实证：男团月榜因此只剩 665,797，真实总和 19,758,658）。
 func (r *Repo) RecomputePerson(ctx context.Context, personID uint64, from, to time.Time) error {
 	accounts, err := r.ListAccounts(ctx, personID)
 	if err != nil {
@@ -119,15 +121,13 @@ func (r *Repo) RecomputePerson(ctx context.Context, personID uint64, from, to ti
 		return err
 	}
 
-	// 只写回 [from, to]，其余日期留着不动。
-	fromKey := from.Format(dateLayout)
-	toKey := to.Format(dateLayout)
+	// tier 全量重标：upsertDailyMetrics 写的是整个 dailyByDate，
+	// 只标窗口内的话窗口外的等级会被 upsert 清成空串。
+	// 月聚合也必须按整月：导入路径 from==to 只有一天，
+	// 用窗口聚合会拿单日的和覆盖整月累计（月榜单日覆盖 bug 的根因）。
 	byMonth := map[string][]domain.DailyMetric{}
 
 	for key, dm := range dailyByDate {
-		if key < fromKey || key > toKey {
-			continue
-		}
 		dm.Tier = metric.ResolveTier(dm.Wave, dailyRules)
 		byMonth[key[:7]] = append(byMonth[key[:7]], *dm)
 	}

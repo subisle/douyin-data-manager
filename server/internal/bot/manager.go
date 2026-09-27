@@ -489,6 +489,9 @@ func (m *Manager) ScheduleAutoReport(date time.Time) {
 }
 
 // PushDailyReport 把某天的日报（图 + 男女团前三名每日之星）推给对接的会话。
+//
+// 图片超过 2 张时对半拆成两条消息发：文字与每日之星跟第一半走，
+// 剩下的跟第二条——一次塞太多图容易丢，分开发更稳。
 func (m *Manager) PushDailyReport(date time.Time) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -507,10 +510,21 @@ func (m *Manager) PushDailyReport(date time.Time) {
 
 	tg := m.GetReminderTargets()
 	opt := RemindOptions{Groups: tg.Groups, Private: tg.Private}
-	res := m.PushToAll(ctx, Outbound{Text: text, Images: images}, opt)
-	m.appendLog(LoggedMessage{At: time.Now(), Channel: "all", Dir: "out",
-		From: "每日推送", Text: text + "\n（" + strings.Join(res, "；") + "）",
-		Intent: "auto_report", HasImage: len(images) > 0})
+
+	send := func(msg Outbound) {
+		res := m.PushToAll(ctx, msg, opt)
+		m.appendLog(LoggedMessage{At: time.Now(), Channel: "all", Dir: "out",
+			From: "每日推送", Text: msg.Text + "\n（" + strings.Join(res, "；") + "）",
+			Intent: "auto_report", HasImage: len(msg.Images) > 0})
+	}
+
+	if len(images) > 2 {
+		half := (len(images) + 1) / 2
+		send(Outbound{Text: text, Images: images[:half]})
+		send(Outbound{Text: fmt.Sprintf("%s 日报（续）", date.Format("1月2日")), Images: images[half:]})
+		return
+	}
+	send(Outbound{Text: text, Images: images})
 }
 
 // dailyStarText 男女团各前三名（按当日音浪）。

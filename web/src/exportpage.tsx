@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, fmtMinutes } from "./api";
 import type { NavParams } from "./nav";
 
-// 每页行数，与后端 /exports/report.svg 的默认值保持一致。
-// 50 行/页：男团 90+ 人两张、女团一张。
-const PAGE_SIZE = 50;
+// 2026-09-27：不再分页——全部人进一张图，只分男女（后端 /exports/report.svg 缺省即全量）。
 
 const todayLocal = () => {
   const d = new Date();
@@ -73,8 +71,7 @@ const DEFAULT_VISIBLE = ["rank", "name", "notLiveDays", "dailyWave", "totalWave"
 /**
  * 导出图片——字段与样式对齐 615：
  * 8 列自由勾选（默认排名/姓名/未播天数/日音浪/累计总音浪），
- * 女队用 classic 样式，男团用 apple 样式。
- * 超过一页（50 行/页）时可翻页，也能一键把每一页分别下载成 PNG。
+ * 一个性别一张整图（不分页），女队 classic 样式，男团 apple 样式。
  */
 export function ExportPage({ params }: { params?: NavParams }) {
   // 默认昨天：数据 T+1，今天还没数，默认今天会让预览直接空掉
@@ -83,8 +80,6 @@ export function ExportPage({ params }: { params?: NavParams }) {
   const [style, setStyle] = useState("auto");
   const [visible, setVisible] = useState<string[]>(DEFAULT_VISIBLE);
   const [svg, setSvg] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageCount, setPageCount] = useState(1);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -95,28 +90,17 @@ export function ExportPage({ params }: { params?: NavParams }) {
     });
   };
 
-  const load = async (o?: { date?: string; gender?: string; page?: number }) => {
+  const load = async (o?: { date?: string; gender?: string }) => {
     const d = o?.date ?? date;
     const g = o?.gender ?? gender;
-    const p = Math.max(1, o?.page ?? page);
     setBusy(true);
     setErr("");
     try {
-      // 先拿总行数算页数（50 行/页，与后端默认一致），再取当前页
-      // （?? []：该日没数据时后端历史版本可能返回 null）
-      const rows = (await api.daily(d, g === "female" ? "female" : g === "male" ? "male" : undefined)) ?? [];
-      const pc = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-      setPageCount(pc);
-      const cur = Math.min(p, pc);
-      setPage(cur);
-
       const usp = new URLSearchParams({
         date: d,
         gender: g,
         style,
-        page: String(cur),
-        pageSize: String(PAGE_SIZE),
-        // 列顺序按 615 的固定顺序输出，勾选只决定去留
+        // 列顺序按 615 的固定顺序输出，勾选只决定去留；缺省不分页
         cols: ALL_COLUMNS.filter((c) => visible.includes(c.key)).map((c) => c.key).join(","),
       });
       const res = await fetch(`/api/v1/exports/report.svg?${usp}`);
@@ -129,9 +113,6 @@ export function ExportPage({ params }: { params?: NavParams }) {
       setBusy(false);
     }
   };
-
-  // 逐页抓取并分别下载 PNG（2 倍图），文件名带页码
-  const pageSuffix = () => (pageCount > 1 ? `-${page}` : "");
 
   // 总排名 CSV：按所选月份的累计音浪排名。
   // 字段：排名 / 主播姓名 / X月音浪 / 时长 / 未播天数（不含等级）。
@@ -162,32 +143,6 @@ export function ExportPage({ params }: { params?: NavParams }) {
         new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }),
         `总排名-${period}-${gender === "female" ? "女团" : "男团"}.csv`,
       );
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const downloadAllPages = async () => {
-    setBusy(true);
-    setErr("");
-    try {
-      for (let p = 1; p <= pageCount; p++) {
-        const usp = new URLSearchParams({
-          date,
-          gender,
-          style,
-          page: String(p),
-          pageSize: String(PAGE_SIZE),
-          cols: ALL_COLUMNS.filter((c) => visible.includes(c.key)).map((c) => c.key).join(","),
-        });
-        const res = await fetch(`/api/v1/exports/report.svg?${usp}`);
-        if (!res.ok) throw new Error(`第 ${p} 页下载失败（${res.status}）`);
-        const text = await res.text();
-        const suffix = pageCount > 1 ? `-${p}` : "";
-        download(await svgToPng(text, 2), `report-${date}-${gender}${suffix}.png`);
-      }
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -241,14 +196,14 @@ export function ExportPage({ params }: { params?: NavParams }) {
           value={date}
           onChange={(e) => {
             setDate(e.target.value);
-            void load({ date: e.target.value, page: 1 });
+            void load({ date: e.target.value });
           }}
         />
         <select
           value={gender}
           onChange={(e) => {
             setGender(e.target.value);
-            void load({ gender: e.target.value, page: 1 });
+            void load({ gender: e.target.value });
           }}
         >
           <option value="female">女队</option>
@@ -258,14 +213,14 @@ export function ExportPage({ params }: { params?: NavParams }) {
           value={style}
           onChange={(e) => {
             setStyle(e.target.value);
-            void load({ page: 1 });
+            void load();
           }}
         >
           <option value="auto">跟随性别</option>
           <option value="classic">classic（样式一）</option>
           <option value="apple">apple（样式二）</option>
         </select>
-        <button onClick={() => void load({ page: 1 })} disabled={busy}>
+        <button onClick={() => void load()} disabled={busy}>
           生成预览
         </button>
         <button className="ghost" disabled={busy} onClick={() => void downloadRankCSV()}>
@@ -274,51 +229,27 @@ export function ExportPage({ params }: { params?: NavParams }) {
         <span className="tiny muted">按所选月份：排名 / X月音浪 / 时长 / 未播天数</span>
       </div>
 
-      {pageCount > 1 && (
-        <div className="toolbar">
-          <button className="ghost btn-sm" disabled={busy || page <= 1} onClick={() => void load({ page: page - 1 })}>
-            ‹ 上一页
-          </button>
-          <span className="badge badge-info">
-            第 {page} / {pageCount} 页
-          </span>
-          <button
-            className="ghost btn-sm"
-            disabled={busy || page >= pageCount}
-            onClick={() => void load({ page: page + 1 })}
-          >
-            下一页 ›
-          </button>
-          <span className="tiny muted">每页 {PAGE_SIZE} 行</span>
-        </div>
-      )}
-
       <div className="toolbar">
         <button
           className="ghost"
           disabled={!svg}
-          onClick={() => download(new Blob([svg], { type: "image/svg+xml" }), `report-${date}-${gender}${pageSuffix()}.svg`)}
+          onClick={() => download(new Blob([svg], { type: "image/svg+xml" }), `report-${date}-${gender}.svg`)}
         >
-          下载 SVG（当前页）
+          下载 SVG
         </button>
         <button
           className="ghost"
           disabled={!svg}
           onClick={async () => {
             try {
-              download(await svgToPng(svg, 2), `report-${date}-${gender}${pageSuffix()}.png`);
+              download(await svgToPng(svg, 2), `report-${date}-${gender}.png`);
             } catch (e) {
               setErr((e as Error).message);
             }
           }}
         >
-          下载 PNG（当前页）
+          下载 PNG
         </button>
-        {pageCount > 1 && (
-          <button onClick={() => void downloadAllPages()} disabled={busy}>
-            下载全部 {pageCount} 页（PNG）
-          </button>
-        )}
         {busy && <span className="muted">生成中…</span>}
       </div>
 

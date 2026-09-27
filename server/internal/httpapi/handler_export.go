@@ -35,13 +35,14 @@ func (s *Server) exportReport(w http.ResponseWriter, r *http.Request) {
 		return // normalizeGender 已经写了错误响应
 	}
 
-	// 50 行/页：男团 90+ 人刚好两张，女团一张——运营反馈 30/页切太碎。
-	pageSize := queryInt(r.URL.Query().Get("pageSize"), 50)
-	if pageSize < 1 {
-		pageSize = 50
+	// 2026-09-27：缺省不再分页——全部人进一张图，只分男女（运营要求）。
+	// pageSize 仍可显式传值分页（0/负数 = 全量）。
+	pageSize := queryInt(r.URL.Query().Get("pageSize"), 0)
+	if pageSize < 0 {
+		pageSize = 0
 	}
-	if pageSize > 100 {
-		pageSize = 100
+	if pageSize > 500 {
+		pageSize = 500
 	}
 	page := queryInt(r.URL.Query().Get("page"), 1)
 	if page < 1 {
@@ -85,7 +86,14 @@ func (s *Server) exportReport(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// 分页：超过一页时按页切，页脚会写「本页 N/M 人」
+	// 分页：pageSize<=0（缺省）= 全量一张图；显式传值时按页切，页脚会写「本页 N/M 人」
+	if pageSize <= 0 {
+		pageSize = len(all)
+		if pageSize == 0 {
+			pageSize = 1
+		}
+		page = 1
+	}
 	pageCount := int(math.Max(1, math.Ceil(float64(len(all))/float64(pageSize))))
 	if page > pageCount {
 		page = pageCount
