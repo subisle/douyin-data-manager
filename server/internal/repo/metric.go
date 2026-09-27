@@ -378,7 +378,8 @@ func (r *Repo) ListMonthlyByPeriod(ctx context.Context, period string, gender do
 	                 p.name AS name, p.gender AS gender
 	          FROM monthly_metric mm
 	          JOIN person p ON p.id = mm.person_id
-	          WHERE mm.period = ? AND p.deleted_at IS NULL AND p.status = 'active'`
+	          WHERE mm.period = ? AND p.deleted_at IS NULL AND p.status = 'active'
+	            AND p.hide_in_daily_report = 0`
 	args := []any{period}
 
 	if gender != "" {
@@ -405,7 +406,8 @@ func (r *Repo) ListYearlyByYear(ctx context.Context, year int, gender domain.Gen
 	                 p.name AS name, p.gender AS gender
 	          FROM yearly_metric y
 	          JOIN person p ON p.id = y.person_id
-	          WHERE y.year = ? AND p.deleted_at IS NULL`
+	          WHERE y.year = ? AND p.deleted_at IS NULL
+	            AND p.hide_in_daily_report = 0`
 	args := []any{year}
 
 	if gender != "" {

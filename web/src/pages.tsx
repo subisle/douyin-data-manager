@@ -99,6 +99,20 @@ export function PersonsPage() {
     await reload();
   };
 
+  // 切换「隐藏」：被隐藏的主播不进日榜/月榜 CSV/年榜，但历史数据保留。
+  const toggleHide = async (p: Person) => {
+    setBusy(true);
+    setMsg("");
+    try {
+      await api.updatePerson(p.id, { hideInDailyReport: !p.hideInDailyReport });
+      await reload();
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="panel">
       <h3 style={{ marginTop: 0 }}>主播管理</h3>
@@ -150,7 +164,15 @@ export function PersonsPage() {
               <td>{genderLabel[p.gender] ?? p.gender}</td>
               <td>{p.status}</td>
               <td className="muted">{p.groupName ?? "—"}</td>
-              <td className="muted">{p.hideInDailyReport ? "是" : "否"}</td>
+              <td>
+                <button
+                  className={`ghost btn-sm ${p.hideInDailyReport ? "warn" : ""}`}
+                  title="点击切换：隐藏后不进入日榜 / 月榜 CSV / 年榜"
+                  onClick={() => void toggleHide(p)}
+                >
+                  {p.hideInDailyReport ? "已隐藏" : "显示中"}
+                </button>
+              </td>
               <td>
                 <button className="ghost danger" onClick={() => void remove(p)}>
                   删除
