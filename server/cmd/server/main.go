@@ -113,6 +113,10 @@ func main() {
 		}
 	}
 
+	// 指标自愈：补算「快照有、指标缺」的日子（导入撞上掉线会留下这种半成品，
+	// 日榜会静默变成全 0 空榜）。启动 1 分钟后扫一次，之后每 6 小时一次。
+	go metricRepairLoop(ctx, r, log)
+
 	// 每天 1 点向活跃会话索要 CSV 文件（机器人页可开关、可手动触发）
 	bots.StartReminderLoop(context.WithoutCancel(ctx))
 
@@ -168,6 +172,50 @@ func main() {
 		log.Error("优雅停机失败", "err", err)
 	}
 	log.Info("已停机")
+}
+
+// metricRepairLoop 定期补算缺指标的日子。
+//
+// 导入流程本身会重算，但撞上数据库掉线就会留下「快照进了、指标没算」的半成品
+// （实测 2026-09-29 就是这样）。日榜以月榜名册 LEFT JOIN 出图，这种日子不会报错，
+// 只会默默发一张全是 0 的空榜——比报错更难发现，所以定期兜一遍。
+func metricRepairLoop(ctx context.Context, r *repo.Repo, log *slog.Logger) {
+	const lookback = 7
+	repair := func() {
+		for i := lookback; i >= 0; i-- {
+			if ctx.Err() != nil {
+				return
+			}
+			day := time.Now().AddDate(0, 0, -i)
+			if !r.DailyMissingMetric(ctx, day) {
+				continue
+			}
+			log.Warn("发现缺指标的日期，补算", "date", day.Format("2006-01-02"))
+			rc, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			n, err := r.RecomputeAll(rc, day, day)
+			cancel()
+			if err != nil {
+				log.Warn("补算失败", "date", day.Format("2006-01-02"), "err", err)
+				continue
+			}
+			log.Info("补算完成", "date", day.Format("2006-01-02"), "persons", n)
+		}
+	}
+
+	timer := time.NewTimer(time.Minute)
+	defer timer.Stop()
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			repair()
+		case <-ticker.C:
+			repair()
+		}
+	}
 }
 
 func newLogger(level string) *slog.Logger {

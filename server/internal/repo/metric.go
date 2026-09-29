@@ -390,6 +390,43 @@ func (r *Repo) ListDailyByDate(ctx context.Context, date time.Time, gender domai
 }
 
 // ListMonthlyByPeriod 取某月全团月榜（月音浪 + 月直播时长）。
+// LatestReportDate 不晚于 before 的最近一个「榜单真有数据」的日期。
+//
+// 判断依据是 daily_metric 里有音浪的行，不是 wave_snapshot：
+// 快照导进来但指标没重算时，日榜按名册 LEFT JOIN 会出一整表 0 值幽灵行，
+// 看着"有数据"其实是空榜（实测 9/29 就是这样）。
+// 日报/每日之星按 T-1 取数，当天常常还没采回来，靠它回退到最近有数据的一天。
+func (r *Repo) LatestReportDate(ctx context.Context, before time.Time) (time.Time, bool) {
+	var d time.Time
+	if err := r.db.GetContext(ctx, &d,
+		`SELECT MAX(biz_date) FROM daily_metric WHERE biz_date <= ? AND wave > 0`, before); err != nil {
+		return time.Time{}, false
+	}
+	if d.IsZero() {
+		return time.Time{}, false
+	}
+	return d, true
+}
+
+// DailyMissingMetric 判断某天是不是「快照进了、指标没算」。
+// 导入撞上数据库掉线时就会留下这种半成品：日榜按名册 LEFT JOIN 会出一整表 0 值，
+// 看上去有榜单其实是空的。返回 true 表示需要补算。
+func (r *Repo) DailyMissingMetric(ctx context.Context, date time.Time) bool {
+	var snapCnt, metricCnt int
+	if err := r.db.GetContext(ctx, &snapCnt,
+		`SELECT COUNT(*) FROM wave_snapshot WHERE biz_date = ?`, date); err != nil {
+		return false
+	}
+	if snapCnt == 0 {
+		return false // 压根没导入，不是漏算
+	}
+	if err := r.db.GetContext(ctx, &metricCnt,
+		`SELECT COUNT(*) FROM daily_metric WHERE biz_date = ? AND wave > 0`, date); err != nil {
+		return false
+	}
+	return metricCnt == 0
+}
+
 func (r *Repo) ListMonthlyByPeriod(ctx context.Context, period string, gender domain.Gender) ([]domain.MonthlyMetric, error) {
 	query := `SELECT mm.person_id, mm.period, mm.wave, mm.minutes, mm.formatted_duration,
 	                 mm.live_days, mm.absent_days, mm.best_day_wave, mm.best_day_date,

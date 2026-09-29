@@ -519,6 +519,9 @@ func (m *Manager) PushDailyReport(date time.Time) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
+	// 导入日没来得及重算（或数据被清了）会发出全 0 空榜，退到最近有数据的一天
+	date, _ = m.resolveReportDate(ctx, date)
+
 	images, err := m.buildDailyReportImages(ctx, date, "")
 	text := fmt.Sprintf("%s 数据已更新，日报如下：", date.Format("1月2日"))
 	if star := m.dailyStarText(ctx, date); star != "" {
@@ -724,7 +727,10 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 		out = o
 
 	case IntentDailyReport:
-		date := parseOrYesterday(intent.Date, now)
+		// T-1 口径：30 号发的是 29 号的榜。29 号还没采回来（或压根没导入）
+		// 就退到最近有数据的一天——发一张全是 0 的空榜比不发更糟。
+		want := parseOrYesterday(intent.Date, now)
+		date, fell := m.resolveReportDate(ctx, want)
 		images, err := m.buildDailyReportImages(ctx, date, intent.Gender)
 		if err != nil {
 			return out, err
@@ -736,6 +742,10 @@ func (m *Manager) Handle(ctx context.Context, in Inbound) (Outbound, error) {
 		}
 		out.Images = images
 		out.Text = fmt.Sprintf("%s 日榜（%d 张）", date.Format("1月2日"), len(images))
+		if fell {
+			out.Text = fmt.Sprintf("%s 暂无数据，以下是最近有数据的 %s 日榜（%d 张）",
+				want.Format("1月2日"), date.Format("1月2日"), len(images))
+		}
 
 	case IntentMonthlyReport:
 		period := intent.Period
@@ -893,6 +903,19 @@ func sumWave(rows []domain.MonthlyMetric) string {
 		total += r.Wave
 	}
 	return render.FormatWave(total)
+}
+
+// resolveReportDate 日报取数日期：目标日没采到数据就退到最近有数据的一天。
+// 返回实际要用的日期，以及是否发生了回退（回退了要在文案里说清楚，别让人误会日期）。
+func (m *Manager) resolveReportDate(ctx context.Context, want time.Time) (time.Time, bool) {
+	latest, ok := m.repo.LatestReportDate(ctx, want)
+	if !ok {
+		return want, false
+	}
+	if latest.Format("2006-01-02") == want.Format("2006-01-02") || latest.After(want) {
+		return want, false
+	}
+	return latest, true
 }
 
 // parseOrYesterday 解析日期，空则昨天。
