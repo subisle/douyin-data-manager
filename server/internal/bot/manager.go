@@ -275,6 +275,29 @@ func (m *Manager) Stop(name string) error {
 	return nil
 }
 
+// StopAll 停止全部通道，返回第一个错误（其余仍会继续停）。
+//
+// 优雅停机必须调它：WebSocket 被进程退出粗暴切断后，QQ 平台侧的旧会话
+// 要等超时才释放，服务重启后立刻重连会拿到 100016 invalid appid or secret
+// （实测：curl 只取 token 一直成功，只有建立会话的请求被拒）。
+// 主动断开能立刻释放，重启后第一次 Start 就连得上。
+func (m *Manager) StopAll() error {
+	m.mu.RLock()
+	names := make([]string, 0, len(m.channels))
+	for name := range m.channels {
+		names = append(names, name)
+	}
+	m.mu.RUnlock()
+
+	var firstErr error
+	for _, name := range names {
+		if err := m.Stop(name); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 // Status 返回所有通道状态。
 //
 // connected 优先问通道本身（WS/长轮询是异步建立的，Start 返回时往往还没连上），

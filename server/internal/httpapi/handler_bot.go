@@ -13,6 +13,7 @@ import (
 	"douyin-server/internal/bot"
 	"douyin-server/internal/bot/transport/ilink"
 	"douyin-server/internal/bot/transport/qq"
+	"douyin-server/internal/repo"
 )
 
 func (s *Server) botManager() (*bot.Manager, bool) {
@@ -249,7 +250,27 @@ func (s *Server) qqCredentials(w http.ResponseWriter, r *http.Request) {
 	// 覆盖挂载（先停旧的，避免两个连接同时跑）
 	_ = m.Stop("qq")
 	m.Register(qq.New(m, req.AppID, req.ClientSecret, req.APIBase))
-	writeJSON(w, http.StatusOK, map[string]any{"mounted": true})
+
+	// 持久化：填一次永久生效，服务重启自动挂载+连接，不用回网页重填。
+	// app_setting 不在备份表的同步列表里，密钥只在盒子本地库。
+	if err := s.repo.SaveQQCredentials(r.Context(), repo.QQCredentials{
+		AppID:        req.AppID,
+		ClientSecret: req.ClientSecret,
+		APIBase:      req.APIBase,
+	}); err != nil {
+		internalError(w, err)
+		return
+	}
+
+	// 填完立刻连上，省一次手动点「开始」
+	startCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	if err := m.Start(startCtx, "qq"); err != nil {
+		// 已挂载但连不上：不回滚保存的凭据，返回挂载成功+错误提示
+		writeJSON(w, http.StatusOK, map[string]any{"mounted": true, "started": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"mounted": true, "started": true})
 }
 
 // botInject POST /api/v1/bots/inject —— 网页端假装自己在群里说话。

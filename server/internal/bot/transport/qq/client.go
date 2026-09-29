@@ -12,10 +12,13 @@ package qq
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sync"
@@ -51,6 +54,11 @@ type Client struct {
 	mu          sync.RWMutex
 	accessToken string
 	expiresAt   time.Time
+
+	// tokenMu 串行化取 token 的整段流程（含 HTTP 请求）。
+	// 没有它的时候，启动瞬间多个 goroutine 会并发刷新 token，平台侧并发校验
+	// 直接判无效（实测返回 100016 invalid appid or secret），服务起来却连不上。
+	tokenMu sync.Mutex
 }
 
 // NewClient 构造客户端。
@@ -74,6 +82,17 @@ func (c *Client) FetchAccessToken(ctx context.Context) (string, time.Duration, e
 	}
 	if c.clientSecret == "" {
 		return "", 0, fmt.Errorf("请填写 QQ 机器人 ClientSecret")
+	}
+
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+
+	// 排队期间可能已被前一个调用者刷新好：直接复用，别再发一次请求
+	c.mu.RLock()
+	cached, cachedExpiry := c.accessToken, c.expiresAt
+	c.mu.RUnlock()
+	if cached != "" && time.Now().Add(5*time.Minute).Before(cachedExpiry) {
+		return cached, time.Until(cachedExpiry), nil
 	}
 
 	body, err := json.Marshal(map[string]string{
@@ -109,6 +128,9 @@ func (c *Client) FetchAccessToken(ctx context.Context) (string, time.Duration, e
 
 	if data.AccessToken == "" {
 		msg := firstNonEmpty(data.Message, data.Msg, data.Error, string(raw))
+		slog.Warn("QQ token 接口返回失败",
+			"appId", c.appID, "secretLen", len(c.clientSecret), "url", c.tokenURL,
+			"secretHash", hash8(c.clientSecret), "bodyHash", hash8(string(body)), "raw", string(raw))
 		if data.Code != nil {
 			return "", 0, fmt.Errorf("获取 QQ Bot token 失败：%s（code %v）", msg, data.Code)
 		}
@@ -381,4 +403,10 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(runes[:n]) + "…"
+}
+
+// hash8 取字符串 md5 的前 8 位，用于日志里核对凭据而不泄露明文。
+func hash8(s string) string {
+	sum := md5.Sum([]byte(s))
+	return hex.EncodeToString(sum[:])[:8]
 }

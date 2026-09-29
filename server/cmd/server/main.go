@@ -71,9 +71,22 @@ func main() {
 		}
 	}
 
-	if cfg.Bots.QQAppID != "" {
-		bots.Register(qq.New(bots, cfg.Bots.QQAppID, cfg.Bots.QQClientSecret, cfg.Bots.QQAPIBase))
-		log.Info("QQ 通道已挂载", "appId", cfg.Bots.QQAppID)
+	// 凭据来源优先级：**库里保存的（网页填的）> 环境变量**。
+	// env 是首次部署的缺省值，但它在容器里是静态的：网页更新过凭据后，
+	// env 里的旧密钥会反过来压制新值（实测：启动拿旧 secret，平台返回
+	// 100016 invalid appid or secret，而网页手填的却是好的）。
+	// 密钥不写进代码：进 Git 就是事故，换机器人也不用重新编译。
+	qqCred := r.GetQQCredentials(ctx)
+	if qqCred.AppID == "" {
+		qqCred = repo.QQCredentials{
+			AppID:        cfg.Bots.QQAppID,
+			ClientSecret: cfg.Bots.QQClientSecret,
+			APIBase:      cfg.Bots.QQAPIBase,
+		}
+	}
+	if qqCred.AppID != "" {
+		bots.Register(qq.New(bots, qqCred.AppID, qqCred.ClientSecret, qqCred.APIBase))
+		log.Info("QQ 通道已挂载", "appId", qqCred.AppID)
 	} else {
 		log.Info("QQ 通道未配置 AppID，可在网页里填写")
 	}
@@ -82,10 +95,22 @@ func main() {
 	// 微信没 token 时 Start 会报未登录，忽略即可——扫码后自动进入会话。
 	for _, name := range []string{"weixin", "qq"} {
 		startCtx, startCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		if err := bots.Start(startCtx, name); err != nil {
+		err := bots.Start(startCtx, name)
+		startCancel()
+
+		// QQ 刚起时可能撞上平台侧旧会话未释放，退避重试（30s/60s/120s）。
+		// 间隔太短没用——服务端会话超时是分钟级的。
+		// 微信未登录是常态（要扫码），重试没意义，不重试。
+		for attempt, backoff := 1, 30*time.Second; err != nil && name == "qq" && attempt < 4; attempt, backoff = attempt+1, backoff*2 {
+			log.Warn("QQ 通道自启失败，退避重试", "attempt", attempt, "backoff", backoff.String(), "err", err)
+			time.Sleep(backoff)
+			retryCtx, retryCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			err = bots.Start(retryCtx, name)
+			retryCancel()
+		}
+		if err != nil {
 			log.Warn("通道自启失败（可稍后在机器人页手动启动）", "channel", name, "err", err)
 		}
-		startCancel()
 	}
 
 	// 每天 1 点向活跃会话索要 CSV 文件（机器人页可开关、可手动触发）
@@ -133,6 +158,12 @@ func main() {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
+
+	// 先断机器人通道：粗暴切断 WebSocket 会让平台侧旧会话挂到超时，
+	// 服务重启后立刻重连会被拒（QQ 实测 100016 invalid appid or secret）。
+	if err := bots.StopAll(); err != nil {
+		log.Warn("停止机器人通道", "err", err)
+	}
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Error("优雅停机失败", "err", err)
 	}

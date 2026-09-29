@@ -25,7 +25,48 @@ const keyReportTitleFemale = "report_title_female"
 // 导出页勾选后自动保存，机器人发图与手动导出共用同一份。
 const keyReportColumns = "report_columns"
 
-// GetReportColumns 读保存的列勾选串；未设置返回空串。
+// QQ 开放平台凭据（网页填一次即永久生效，重启自动挂载并连上）。
+// 不放代码里：密钥进 Git 就是事故，而且换机器人不用重编译。
+const keyQQAppID = "qq_app_id"
+const keyQQSecret = "qq_client_secret"
+const keyQQAPIBase = "qq_api_base"
+
+// QQCredentials QQ 通道凭据。
+type QQCredentials struct {
+	AppID        string
+	ClientSecret string
+	APIBase      string
+}
+
+// GetQQCredentials 读已保存的 QQ 凭据；没填过返回空 AppID。
+func (r *Repo) GetQQCredentials(ctx context.Context) QQCredentials {
+	read := func(key string) string {
+		v, err := r.GetSetting(ctx, key)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(v)
+	}
+	return QQCredentials{
+		AppID:        read(keyQQAppID),
+		ClientSecret: read(keyQQSecret),
+		APIBase:      read(keyQQAPIBase),
+	}
+}
+
+// SaveQQCredentials 保存 QQ 凭据（appSetting 不同步到备份库，密钥不出盒子）。
+func (r *Repo) SaveQQCredentials(ctx context.Context, c QQCredentials) error {
+	for key, val := range map[string]string{
+		keyQQAppID:   strings.TrimSpace(c.AppID),
+		keyQQSecret:  strings.TrimSpace(c.ClientSecret),
+		keyQQAPIBase: strings.TrimSpace(c.APIBase),
+	} {
+		if err := r.SetSetting(ctx, key, val); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 func (r *Repo) GetReportColumns(ctx context.Context) string {
 	v, err := r.GetSetting(ctx, keyReportColumns)
 	if err != nil {
